@@ -101,8 +101,9 @@ def article_filter(source_id: int | None, search: str) -> tuple[str, list]:
         filters.append("articles.source_id = ?")
         parameters.append(source_id)
     if search:
-        filters.append("(articles.title LIKE ? OR articles.summary LIKE ?)")
-        pattern = f"%{search}%"
+        filters.append("(articles.title LIKE ? ESCAPE '\\' OR articles.summary LIKE ? ESCAPE '\\')")
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         parameters.extend((pattern, pattern))
     return (f"WHERE {' AND '.join(filters)}" if filters else ""), parameters
 
@@ -123,6 +124,16 @@ def count_articles(path: Path, source_id: int | None = None, search: str = "") -
     with connect(path) as db:
         where, parameters = article_filter(source_id, search)
         return db.execute(f"SELECT COUNT(*) FROM articles {where}", parameters).fetchone()[0]
+
+
+def drafted_article_ids(path: Path, article_ids: list[int]) -> set[int]:
+    if not article_ids:
+        return set()
+    placeholders = ",".join("?" for _ in article_ids)
+    with connect(path) as db:
+        return {row[0] for row in db.execute(
+            f"SELECT article_id FROM posts WHERE article_id IN ({placeholders})", article_ids
+        )}
 
 
 def overview_counts(path: Path) -> dict[str, int]:
@@ -169,13 +180,23 @@ def make_draft(path: Path, article_id: int) -> int:
         return db.execute("SELECT id FROM posts WHERE article_id = ?", (article_id,)).fetchone()["id"]
 
 
-def list_posts(path: Path, limit: int = 50):
+def list_posts(path: Path, limit: int = 50, offset: int = 0):
     with connect(path) as db:
         return db.execute(
             """SELECT posts.*, articles.title AS article_title, articles.url AS article_url
                FROM posts JOIN articles ON articles.id = posts.article_id
-               ORDER BY posts.created_at DESC, posts.id DESC LIMIT ?""", (limit,)
+               ORDER BY posts.created_at DESC, posts.id DESC LIMIT ? OFFSET ?""", (limit, offset)
         ).fetchall()
+
+
+def count_posts(path: Path) -> int:
+    with connect(path) as db:
+        return db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+
+
+def get_post_for_article(path: Path, article_id: int):
+    with connect(path) as db:
+        return db.execute("SELECT id, status FROM posts WHERE article_id = ?", (article_id,)).fetchone()
 
 
 def get_post(path: Path, post_id: int):

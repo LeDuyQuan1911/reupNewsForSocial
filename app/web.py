@@ -51,17 +51,19 @@ def create_app(database_path: Path | None = None) -> Flask:
         source_value = request.args.get("source", "")
         source_id = int(source_value) if source_value.isdecimal() else None
         search = request.args.get("q", "").strip()[:100]
-        page_value = request.args.get("page", "1")
-        page = max(1, int(page_value)) if page_value.isdecimal() else 1
         page_size = 25
         total = database.count_articles(app.config["DATABASE_PATH"], source_id, search)
-        posts = database.list_posts(app.config["DATABASE_PATH"], limit=10000)
+        page_value = request.args.get("page", "1")
+        requested_page = int(page_value) if page_value.isdecimal() and len(page_value) <= 10 else 1
+        page = min(max(1, requested_page), max(1, (total + page_size - 1) // page_size))
+        articles = database.list_articles(app.config["DATABASE_PATH"], limit=page_size,
+                                          source_id=source_id, search=search, offset=(page - 1) * page_size)
         return render_template(
             "articles.html",
-            articles=database.list_articles(app.config["DATABASE_PATH"], limit=page_size,
-                                            source_id=source_id, search=search, offset=(page - 1) * page_size),
+            articles=articles,
             sources=database.list_sources(app.config["DATABASE_PATH"]),
-            posted_articles={post["article_id"] for post in posts},
+            posted_articles=database.drafted_article_ids(app.config["DATABASE_PATH"],
+                                                         [article["id"] for article in articles]),
             selected_source=source_id,
             search=search,
             page=page,
@@ -74,8 +76,7 @@ def create_app(database_path: Path | None = None) -> Flask:
         article = database.get_article(app.config["DATABASE_PATH"], article_id)
         if article is None:
             abort(404)
-        post = next((item for item in database.list_posts(app.config["DATABASE_PATH"], limit=10000)
-                     if item["article_id"] == article_id), None)
+        post = database.get_post_for_article(app.config["DATABASE_PATH"], article_id)
         source = next((item for item in database.list_sources(app.config["DATABASE_PATH"])
                        if item["id"] == article["source_id"]), None)
         return render_template("article.html", article=article, source=source, post=post)
@@ -86,7 +87,14 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.get("/posts")
     def posts_page():
-        return render_template("posts.html", posts=database.list_posts(app.config["DATABASE_PATH"], limit=10000))
+        page_size = 25
+        total = database.count_posts(app.config["DATABASE_PATH"])
+        page_value = request.args.get("page", "1")
+        requested_page = int(page_value) if page_value.isdecimal() and len(page_value) <= 10 else 1
+        page = min(max(1, requested_page), max(1, (total + page_size - 1) // page_size))
+        return render_template("posts.html", posts=database.list_posts(
+            app.config["DATABASE_PATH"], limit=page_size, offset=(page - 1) * page_size
+        ), page=page, total=total, page_size=page_size)
 
     @app.get("/account")
     def account_page():

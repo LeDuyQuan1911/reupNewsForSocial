@@ -72,8 +72,31 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.client.get("/articles/99999").status_code, 404)
         self.assertIn("AI &amp; tools", self.client.get("/articles?q=AI&source=" + str(source_id)).data.decode())
         self.assertNotIn("AI &amp; tools", self.client.get("/articles?q=missing").data.decode())
+        self.assertEqual(self.client.get("/articles?page=999999999999999999999").status_code, 200)
+        self.assertEqual(self.client.get("/posts?page=999999999999999999999").status_code, 200)
         response = self.client.post("/sources", data={"csrf_token": self.csrf, "name": "Another", "url": "https://example.org/rss"})
         self.assertEqual(response.location, "/sources")
+
+    def test_literal_search_and_post_pagination(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        articles = [{"title": f"Story {index}", "url": f"https://example.com/{index}",
+                     "summary": "", "published_at": ""} for index in range(27)]
+        articles[0]["title"] = "100% complete"
+        articles[1]["title"] = "1000 users"
+        database.save_articles(self.db_path, source_id, articles)
+        self.assertEqual([row["title"] for row in database.list_articles(self.db_path, search="100%")],
+                         ["100% complete"])
+        self.assertEqual(database.count_articles(self.db_path, search="100%"), 1)
+        for article in database.list_articles(self.db_path):
+            database.make_draft(self.db_path, article["id"])
+        self.assertEqual(database.count_posts(self.db_path), 27)
+        self.assertEqual(len(database.list_posts(self.db_path, limit=25, offset=25)), 2)
+        page = self.client.get("/posts?page=2").data.decode()
+        self.assertIn("Trang 2 / 2", page)
+        self.assertIn("Story 26", page)
+        first_id = database.list_articles(self.db_path, search="100%")[0]["id"]
+        self.assertIsNotNone(database.get_post_for_article(self.db_path, first_id))
 
     def test_github_repositories_are_normalized(self):
         articles = github.parse_repositories({"items": [
