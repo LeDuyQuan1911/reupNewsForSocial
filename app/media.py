@@ -1,14 +1,15 @@
 """Prepare a local JPEG for each post from its article or GitHub repository."""
 
 from html.parser import HTMLParser
+from http.client import HTTPSConnection
 from io import BytesIO
 import ipaddress
 from pathlib import Path
 import re
 import socket
-from urllib.error import HTTPError
+import ssl
 from urllib.parse import urljoin, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import uuid4
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from playwright.sync_api import sync_playwright
@@ -26,12 +27,17 @@ class MissingImageError(ValueError):
     """A post cannot be published until its image is ready."""
 
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
-        return None
+class PinnedHTTPSConnection(HTTPSConnection):
+    def __init__(self, hostname: str, address: str):
+        super().__init__(hostname, port=443, timeout=20, context=ssl.create_default_context())
+        self.address = address
+
+    def connect(self):
+        socket_connection = socket.create_connection((self.address, 443), self.timeout)
+        self.sock = self._context.wrap_socket(socket_connection, server_hostname=self.host)
 
 
-def validate_public_url(url: str) -> None:
+def validate_public_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("Ảnh hoặc trang nguồn phải dùng URL HTTPS công khai")
@@ -40,23 +46,29 @@ def validate_public_url(url: str) -> None:
     addresses = socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
     if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global for item in addresses):
         raise ValueError("URL nguồn không được trỏ đến mạng riêng hoặc máy cục bộ")
+    return addresses[0][4][0]
 
 
 def fetch_public_bytes(url: str, limit: int) -> tuple[bytes, str]:
-    opener = build_opener(NoRedirect)
     current = url
     for _ in range(5):
-        validate_public_url(current)
-        request = Request(current, headers={"User-Agent": "Mozilla/5.0 (compatible; reupNewsForSocial/0.2)"})
+        address = validate_public_url(current)
+        parsed = urlparse(current)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+        connection = PinnedHTTPSConnection(parsed.hostname, address)
         try:
-            response = opener.open(request, timeout=20)
-        except HTTPError as exc:
-            if exc.code in {301, 302, 303, 307, 308} and exc.headers.get("Location"):
-                current = urljoin(current, exc.headers["Location"])
+            connection.request("GET", path, headers={"User-Agent": "Mozilla/5.0 (compatible; reupNewsForSocial/0.2)"})
+            response = connection.getresponse()
+            if response.status in {301, 302, 303, 307, 308} and response.getheader("Location"):
+                current = urljoin(current, response.getheader("Location"))
                 continue
-            raise
-        with response:
+            if response.status >= 400:
+                raise ValueError(f"Nguồn trả HTTP {response.status}")
             data = response.read(limit + 1)
+        finally:
+            connection.close()
         if len(data) > limit:
             raise ValueError("Ảnh hoặc trang nguồn quá lớn")
         return data, current
@@ -155,10 +167,10 @@ def title_card(title: str, source: str, article_url: str) -> bytes:
 
 
 def post_image_path(database_path: Path, post) -> Path:
-    expected = f"post-{post['id']}.jpg"
-    if post["image_file"] != expected:
+    image_file = post["image_file"] or ""
+    if not re.fullmatch(rf"post-{post['id']}(?:-[0-9a-f]{{32}})?\.jpg", image_file):
         raise MissingImageError("Bài chưa có ảnh được chuẩn bị")
-    path = database_path.parent / "media" / expected
+    path = database_path.parent / "media" / image_file
     if not path.is_file():
         raise MissingImageError("File ảnh của bài không còn trên máy; hãy lấy lại ảnh")
     return path
@@ -192,10 +204,12 @@ def prepare_post_image(database_path: Path, post_id: int) -> Path:
             kind = "title_card"
     media_dir = database_path.parent / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
-    file_name = f"post-{post_id}.jpg"
+    file_name = f"post-{post_id}-{uuid4().hex}.jpg"
     target = media_dir / file_name
-    temporary = media_dir / f".{file_name}.tmp"
-    temporary.write_bytes(image)
-    temporary.replace(target)
-    database.attach_image(database_path, post_id, file_name, source_url, kind)
+    target.write_bytes(image)
+    try:
+        database.attach_image(database_path, post_id, file_name, source_url, kind)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return target

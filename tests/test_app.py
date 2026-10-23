@@ -98,7 +98,7 @@ class DashboardTests(unittest.TestCase):
         with patch("app.queue.llm.check_post", return_value=(True, "Đạt")), patch("app.queue.facebook.publish_page", return_value="123_456") as publisher:
             self.assertTrue(database.claim_post(self.db_path, post["id"]))
             queue.process_claimed_post(self.db_path, post["id"])
-            publisher.assert_called_once_with(post["body"], image_path)
+            publisher.assert_called_once_with(post["body"], image_path.read_bytes())
         result = database.get_post(self.db_path, post["id"])
         self.assertEqual(result["status"], "published")
         self.assertEqual(result["platform_post_id"], "123_456")
@@ -178,6 +178,26 @@ class DashboardTests(unittest.TestCase):
             publisher.assert_not_called()
         self.assertEqual(database.get_post(self.db_path, post_id)["status"], "failed")
 
+    def test_publishes_exact_image_bytes_reviewed(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        image_path = self.attach_test_image(post_id)
+        original = image_path.read_bytes()
+        database.claim_post(self.db_path, post_id)
+
+        def change_image_after_review(body, image_bytes):
+            self.assertEqual(image_bytes, original)
+            Image.new("RGB", (64, 32), "blue").save(image_path, "JPEG")
+            return True, "Đạt"
+
+        with patch("app.queue.llm.check_post", side_effect=change_image_after_review), patch(
+            "app.queue.facebook.publish_page", return_value="post-1"
+        ) as publisher:
+            queue.process_claimed_post(self.db_path, post_id)
+        publisher.assert_called_once_with(database.get_post(self.db_path, post_id)["body"], original)
+
     def test_prepare_source_image_and_fallback_card(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
         source_id = database.list_sources(self.db_path)[0]["id"]
@@ -192,10 +212,13 @@ class DashboardTests(unittest.TestCase):
             path = media.prepare_post_image(self.db_path, post_id)
         self.assertTrue(path.is_file())
         self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "source")
+        first_bytes = path.read_bytes()
         with patch("app.media.fetch_public_bytes", side_effect=ValueError("source unavailable")):
-            media.prepare_post_image(self.db_path, post_id)
+            replacement = media.prepare_post_image(self.db_path, post_id)
+        self.assertNotEqual(path, replacement)
+        self.assertEqual(path.read_bytes(), first_bytes)
         self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "title_card")
-        with Image.open(path) as image:
+        with Image.open(replacement) as image:
             self.assertEqual(image.size, (1200, 630))
 
     def test_vision_review_includes_image_and_fails_closed(self):
@@ -204,7 +227,7 @@ class DashboardTests(unittest.TestCase):
         with patch.dict(os.environ, {"REUP_LLM_VISION_MODEL": "vision-test"}), patch(
             "app.llm.request_chat", return_value='{"allowed": false, "reason": "Ảnh không phù hợp"}'
         ) as request_chat:
-            self.assertEqual(llm.check_post("Text", image_path), (False, "Ảnh không phù hợp"))
+            self.assertEqual(llm.check_post("Text", image_path.read_bytes()), (False, "Ảnh không phù hợp"))
         messages = request_chat.call_args.args[1]
         self.assertEqual(request_chat.call_args.args[0], "vision-test")
         self.assertTrue(messages[1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
@@ -217,7 +240,7 @@ class DashboardTests(unittest.TestCase):
             "REUP_META_GRAPH_VERSION": "v26.0",
         }
         with patch.dict(os.environ, settings), patch("app.facebook.urlopen", return_value=BytesIO(b'{"id":"photo-1","post_id":"post-1"}')) as send:
-            self.assertEqual(facebook.publish_page("A caption", image_path), "post-1")
+            self.assertEqual(facebook.publish_page("A caption", image_path.read_bytes()), "post-1")
         request = send.call_args.args[0]
         self.assertEqual(request.full_url, "https://graph.facebook.com/v26.0/123/photos")
         self.assertIn(b"A caption", request.data)
@@ -242,6 +265,14 @@ class DashboardTests(unittest.TestCase):
     def test_image_fetch_rejects_private_network(self):
         with self.assertRaises(ValueError):
             media.validate_public_url("https://127.0.0.1/private.jpg")
+
+    def test_image_fetch_connects_to_vetted_ip(self):
+        with patch("app.media.validate_public_url", return_value="8.8.8.8"), patch("app.media.PinnedHTTPSConnection") as pinned:
+            response = pinned.return_value.getresponse.return_value
+            response.status = 200
+            response.read.return_value = b"image"
+            self.assertEqual(media.fetch_public_bytes("https://cdn.example.com/a.jpg", 10)[0], b"image")
+        pinned.assert_called_once_with("cdn.example.com", "8.8.8.8")
 
     def test_image_preview_with_relative_database_path(self):
         relative_db = self.db_path.relative_to(Path.cwd())

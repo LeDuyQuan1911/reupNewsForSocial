@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 import re
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -26,13 +25,12 @@ def photo_request_body(body: str, image: bytes, token: str, boundary: str) -> by
     return b"".join(parts)
 
 
-def publish_page(body: str, image_path: Path) -> str:
+def publish_page(body: str, image: bytes) -> str:
     page_id = os.environ.get("REUP_FACEBOOK_PAGE_ID", "").strip()
     token = os.environ.get("REUP_FACEBOOK_PAGE_TOKEN", "").strip()
     version = os.environ.get("REUP_META_GRAPH_VERSION", "").strip()
     if not page_id or not token or not re.fullmatch(r"v\d+\.\d+", version):
         raise PageConfigurationError("Cần REUP_FACEBOOK_PAGE_ID, REUP_FACEBOOK_PAGE_TOKEN và REUP_META_GRAPH_VERSION")
-    image = image_path.read_bytes()
     if not image.startswith(b"\xff\xd8\xff") or len(image) > 10_000_000:
         raise ValueError("Ảnh JPEG không hợp lệ hoặc quá 10 MB")
     boundary = f"reup-{uuid4().hex}"

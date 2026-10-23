@@ -3,7 +3,6 @@
 import json
 import os
 import base64
-from pathlib import Path
 from urllib.request import Request, urlopen
 
 
@@ -69,11 +68,11 @@ def parse_verdict(raw: str) -> tuple[bool, str]:
     return verdict["allowed"], reason
 
 
-def check_post(body: str, image_path: Path) -> tuple[bool, str]:
+def check_post(body: str, image_bytes: bytes) -> tuple[bool, str]:
     model = os.environ.get("REUP_LLM_VISION_MODEL", "").strip() or os.environ.get("REUP_LLM_MODEL", "").strip()
     if not model:
         raise ValueError("Chưa cấu hình REUP_LLM_VISION_MODEL hoặc REUP_LLM_MODEL")
-    image = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    image = base64.b64encode(image_bytes).decode("ascii")
     system = (
         "Kiểm duyệt cả văn bản và ảnh cho bài Facebook/LinkedIn. Chặn nội dung bạo lực, thù ghét, tình dục, bóc lột trẻ em, "
         "quấy rối, lừa đảo, thông tin riêng tư và hình ảnh phản cảm. Nếu không xem được ảnh hoặc không chắc, trả allowed=false. "
