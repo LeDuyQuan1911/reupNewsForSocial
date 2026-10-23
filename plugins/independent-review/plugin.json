@@ -1,0 +1,5 @@
+{
+  "id": "independent-review",
+  "name": "Independent code review",
+  "description": "Agent khác review PR độc lập theo bằng chứng trước khi chủ repo quyết định merge"
+}

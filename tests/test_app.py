@@ -1,0 +1,495 @@
+import tempfile
+import unittest
+import re
+import os
+from pathlib import Path
+from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from urllib.parse import parse_qs
+
+from PIL import Image
+
+from app import anthropic, database, facebook, feeds, github, llm, media, queue
+from app.web import create_app
+
+
+RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+<item><title>AI &amp; tools</title><link>https://example.com/one</link>
+<description><![CDATA[<p>A brief <b>summary</b>.</p>]]></description>
+<pubDate>Fri, 23 Oct 2026 09:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+
+class DashboardTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
+        self.db_path = Path(self.directory.name) / "test.sqlite3"
+        self.client = create_app(self.db_path).test_client()
+        page = self.client.get("/").data.decode()
+        self.csrf = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def attach_test_image(self, post_id):
+        image_path = self.db_path.parent / "media" / f"post-{post_id}.jpg"
+        image_path.parent.mkdir(exist_ok=True)
+        Image.new("RGB", (64, 32), "green").save(image_path, "JPEG")
+        database.attach_image(self.db_path, post_id, image_path.name, "https://example.com/image.jpg")
+        return image_path
+
+    def test_rss_parsing_and_deduplication(self):
+        articles = feeds.parse_feed(RSS)
+        self.assertEqual(articles[0]["title"], "AI & tools")
+        self.assertEqual(articles[0]["summary"], "A brief summary .")
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        self.assertEqual(database.save_articles(self.db_path, source_id, articles), 1)
+        self.assertEqual(database.save_articles(self.db_path, source_id, articles), 0)
+        self.assertEqual(len(database.list_articles(self.db_path)), 1)
+
+    def test_dashboard_and_source_validation(self):
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.post("/sources", data={"name": "bad", "url": "https://example.com"}).status_code, 403)
+        self.client.post("/sources", data={"csrf_token": self.csrf, "name": "bad", "url": "file:///etc/passwd"})
+        self.assertEqual(len(database.list_sources(self.db_path)), 0)
+        self.client.post("/sources", data={"csrf_token": self.csrf, "name": "Example", "url": "https://example.com/rss"})
+        self.assertEqual(len(database.list_sources(self.db_path)), 1)
+
+    def test_separate_pages_and_article_filters(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        article_id = database.list_articles(self.db_path)[0]["id"]
+        for route, heading in (("/", "Tìm bài mới"), ("/articles", "Bài đã tìm thấy"),
+                               ("/sources", "RSS hoặc Atom"), ("/posts", "Hàng đợi và lịch sử"),
+                               ("/account", "Facebook Page"),
+                               (f"/articles/{article_id}", "AI &amp; tools")):
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 200, route)
+            self.assertIn(heading, response.data.decode(), route)
+            self.assertIn('aria-label="Điều hướng chính"', response.data.decode(), route)
+            if route in {"/", "/articles", "/sources", "/posts", "/account"}:
+                self.assertNotIn('class="page-heading"', response.data.decode(), route)
+        self.assertEqual(self.client.get("/articles/99999").status_code, 404)
+        self.assertIn("AI &amp; tools", self.client.get("/articles?q=AI&source=" + str(source_id)).data.decode())
+        self.assertNotIn("AI &amp; tools", self.client.get("/articles?q=missing").data.decode())
+        self.assertEqual(self.client.get("/articles?page=999999999999999999999").status_code, 200)
+        self.assertEqual(self.client.get("/posts?page=999999999999999999999").status_code, 200)
+        response = self.client.post("/sources", data={"csrf_token": self.csrf, "name": "Another", "url": "https://example.org/rss"})
+        self.assertEqual(response.location, "/sources")
+
+    def test_publication_workflow_shows_source_destination_and_actual_or_planned_time(self):
+        database.add_source(self.db_path, "Example Feed", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, [
+            {"title": title, "url": f"https://example.com/{index}", "summary": "", "published_at": ""}
+            for index, title in enumerate(("No draft", "Scheduled story", "Published story"))
+        ])
+        articles = {row["title"]: row["id"] for row in database.list_articles(self.db_path)}
+        scheduled_id = database.make_draft(self.db_path, articles["Scheduled story"])
+        self.attach_test_image(scheduled_id)
+        database.schedule_post(self.db_path, scheduled_id, "2026-10-24T03:00:00+00:00")
+        published_id = database.make_draft(self.db_path, articles["Published story"])
+        self.attach_test_image(published_id)
+        self.assertTrue(database.claim_post(self.db_path, published_id))
+        database.finish_post(self.db_path, published_id, "published",
+                             platform_post_id="page_1", published_at="2026-10-23T10:00:00+00:00")
+
+        rows = {row["article_title"]: row for row in database.list_publication_workflows(
+            self.db_path, with_post_only=False
+        )}
+        self.assertIsNone(rows["No draft"]["post_id"])
+        self.assertEqual(rows["Scheduled story"]["post_scheduled_at"], "2026-10-24T03:00:00+00:00")
+        self.assertEqual(rows["Published story"]["post_published_at"], "2026-10-23T10:00:00+00:00")
+        selected_page = self.client.get("/workflow").data.decode()
+        self.assertIn("Đã chọn đăng (2)", selected_page)
+        self.assertNotIn("No draft", selected_page)
+        page = self.client.get("/workflow?view=all").data.decode()
+        for expected in ("Example Feed", "No draft", "Scheduled story", "Published story",
+                         "Chưa chọn", "Facebook Page", "Lịch đăng", "24/10/2026 10:00",
+                         "Đã đăng", "23/10/2026 17:00"):
+            self.assertIn(expected, page)
+        self.assertIn('href="/posts/' + str(scheduled_id) + '"', page)
+        self.assertEqual(self.client.get("/workflow?view=all&page=999999999999999999999").status_code, 200)
+
+    def test_literal_search_and_post_pagination(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        articles = [{"title": f"Story {index}", "url": f"https://example.com/{index}",
+                     "summary": "", "published_at": ""} for index in range(27)]
+        articles[0]["title"] = "100% complete"
+        articles[1]["title"] = "1000 users"
+        database.save_articles(self.db_path, source_id, articles)
+        self.assertEqual([row["title"] for row in database.list_articles(self.db_path, search="100%")],
+                         ["100% complete"])
+        self.assertEqual(database.count_articles(self.db_path, search="100%"), 1)
+        for article in database.list_articles(self.db_path):
+            database.make_draft(self.db_path, article["id"])
+        self.assertEqual(database.count_posts(self.db_path), 27)
+        self.assertEqual(len(database.list_posts(self.db_path, limit=25, offset=25)), 2)
+        page = self.client.get("/posts?page=2").data.decode()
+        self.assertIn("Trang 2 / 2", page)
+        self.assertIn("Story 26", page)
+        workflow_page = self.client.get("/workflow?view=all&page=2").data.decode()
+        self.assertIn("Trang 2 / 2", workflow_page)
+        self.assertIn("100% complete", workflow_page)
+        first_id = database.list_articles(self.db_path, search="100%")[0]["id"]
+        self.assertIsNotNone(database.get_post_for_article(self.db_path, first_id))
+
+    def test_github_repositories_are_normalized(self):
+        articles = github.parse_repositories({"items": [
+            {"full_name": "owner/project", "html_url": "https://github.com/owner/project", "description": "Example", "stargazers_count": 120, "created_at": "2026-10-01T00:00:00Z"},
+            {"full_name": "bad", "html_url": "https://example.com/bad"},
+        ]})
+        self.assertEqual(len(articles), 1)
+        self.assertIn("120 stars", articles[0]["summary"])
+
+    def test_anthropic_sitemap_and_metadata(self):
+        sitemap = b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.anthropic.com/news/example</loc><lastmod>2026-10-23</lastmod></url></urlset>'
+        self.assertEqual(anthropic.recent_news_urls(sitemap), ["https://www.anthropic.com/news/example"])
+        parser = anthropic.MetadataParser()
+        parser.feed('<meta property="og:title" content="Example story"><meta property="og:description" content="An update">')
+        self.assertEqual(parser.metadata["og:title"], "Example story")
+
+    def test_test_only_schedule_never_claims_or_publishes(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        database.schedule_post(self.db_path, post_id, "2020-01-01T00:00:00+00:00", test_only=True)
+        with patch.object(facebook, "publish_page") as publish:
+            self.assertEqual(queue.process_due_posts(self.db_path), 0)
+            self.assertFalse(database.claim_post(self.db_path, post_id))
+            publish.assert_not_called()
+        post = database.get_post(self.db_path, post_id)
+        self.assertEqual(post["status"], "scheduled")
+        self.assertEqual(post["test_only"], 1)
+        page = self.client.get(f"/posts/{post_id}").data.decode()
+        self.assertIn("Lịch thử nghiệm · không đăng", page)
+        self.assertNotIn("Đăng ngay lên Page", page)
+
+    def test_draft_schedule_and_moderated_publish(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        article_id = database.list_articles(self.db_path)[0]["id"]
+        database.make_draft(self.db_path, article_id)
+        database.make_draft(self.db_path, article_id)
+        post = database.list_posts(self.db_path)[0]
+        image_path = self.attach_test_image(post["id"])
+        self.assertEqual(self.client.get(f"/posts/{post['id']}").status_code, 200)
+        image_response = self.client.get(f"/posts/{post['id']}/image")
+        self.assertEqual(image_response.mimetype, "image/jpeg")
+        image_response.close()
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        database.schedule_post(self.db_path, post["id"], future)
+        database.unschedule_post(self.db_path, post["id"])
+        self.assertEqual(database.get_post(self.db_path, post["id"])["status"], "draft")
+        database.schedule_post(self.db_path, post["id"], future)
+        self.assertEqual(queue.process_due_posts(self.db_path), 0)
+        self.assertTrue(database.claim_post(self.db_path, post["id"]))
+        with patch("app.queue.llm.check_post", return_value=(False, "Cần xem lại")), patch("app.queue.facebook.publish_page") as publisher:
+            queue.process_claimed_post(self.db_path, post["id"])
+            publisher.assert_not_called()
+        self.assertEqual(database.get_post(self.db_path, post["id"])["status"], "blocked")
+        with patch("app.queue.llm.check_post", return_value=(True, "Đạt")), patch("app.queue.facebook.publish_page", return_value="123_456") as publisher:
+            self.assertTrue(database.claim_post(self.db_path, post["id"]))
+            queue.process_claimed_post(self.db_path, post["id"])
+            publisher.assert_called_once_with(post["body"], image_path.read_bytes())
+        result = database.get_post(self.db_path, post["id"])
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(result["platform_post_id"], "123_456")
+        self.assertFalse(database.claim_post(self.db_path, post["id"]))
+
+    def test_similar_news_is_blocked_before_publishing(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        articles = [
+            {"title": "New AI model released", "url": "https://example.com/one", "summary": "", "published_at": ""},
+            {"title": "New AI model released!", "url": "https://example.com/two", "summary": "", "published_at": ""},
+        ]
+        database.save_articles(self.db_path, source_id, articles)
+        for article in database.list_articles(self.db_path):
+            database.make_draft(self.db_path, article["id"])
+        posts = database.list_posts(self.db_path)
+        first, second = posts[0]["id"], posts[1]["id"]
+        self.attach_test_image(first)
+        self.attach_test_image(second)
+        database.claim_post(self.db_path, first)
+        database.finish_post(self.db_path, first, "published", platform_post_id="1", published_at=queue.now_utc())
+        database.claim_post(self.db_path, second)
+        with patch("app.queue.llm.check_post") as reviewer, patch("app.queue.facebook.publish_page") as publisher:
+            queue.process_claimed_post(self.db_path, second)
+            reviewer.assert_not_called()
+            publisher.assert_not_called()
+        self.assertEqual(database.get_post(self.db_path, second)["status"], "blocked")
+
+    def test_uncertain_facebook_response_requires_manual_reconciliation(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        post_id = database.list_posts(self.db_path)[0]["id"]
+        self.attach_test_image(post_id)
+        self.assertTrue(database.claim_post(self.db_path, post_id))
+        with patch("app.queue.llm.check_post", return_value=(True, "Đạt")), patch(
+            "app.queue.facebook.publish_page", side_effect=TimeoutError("response lost")
+        ):
+            queue.process_claimed_post(self.db_path, post_id)
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "uncertain")
+        self.assertFalse(database.claim_post(self.db_path, post_id))
+        response = self.client.post(
+            f"/posts/{post_id}/resolve",
+            data={"csrf_token": self.csrf, "checked_page": "yes", "outcome": "published"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "published")
+
+    def test_image_extraction_and_page_photo_payload(self):
+        feed = b'''<rss xmlns:media="http://search.yahoo.com/mrss/" version="2.0"><channel><item>
+        <title>Image story</title><link>https://example.com/story</link>
+        <media:content url="https://cdn.example.com/cover.png" type="image/png"/>
+        </item></channel></rss>'''
+        self.assertEqual(feeds.parse_feed(feed)[0]["image_url"], "https://cdn.example.com/cover.png")
+        parser = media.ImageMetadataParser()
+        parser.feed('<meta property="og:image" content="/cover.jpg">')
+        self.assertEqual(parser.metadata["og:image"], "/cover.jpg")
+        image = Image.new("RGB", (640, 320), "blue")
+        output = BytesIO()
+        image.save(output, "PNG")
+        jpeg = media.normalized_jpeg(output.getvalue())
+        self.assertTrue(jpeg.startswith(b"\xff\xd8\xff"))
+        payload = facebook.photo_request_body("Caption", jpeg, "test-token", "boundary")
+        self.assertIn(b'name="source"; filename="post.jpg"', payload)
+        self.assertIn(jpeg, payload)
+        self.assertIn(b"Caption", payload)
+
+    def test_multiple_images_can_be_added_previewed_and_reviewed(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        first = self.attach_test_image(post_id).read_bytes()
+        second_buffer = BytesIO()
+        Image.new("RGB", (640, 320), "blue").save(second_buffer, "JPEG")
+        second = second_buffer.getvalue()
+        media.save_post_image(self.db_path, post_id, second, "", "upload")
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual(len(images), 2)
+        page = self.client.get(f"/posts/{post_id}").data.decode()
+        self.assertIn("Ảnh của bài đăng (2/10)", page)
+        self.assertIn(f"/posts/{post_id}/images/{images[1]['id']}", page)
+        image_response = self.client.get(f"/posts/{post_id}/images/{images[1]['id']}")
+        self.assertEqual(image_response.data, second)
+        image_response.close()
+        self.assertTrue(database.claim_post(self.db_path, post_id))
+        with patch("app.queue.llm.check_post", return_value=(True, "OK")) as reviewer, patch(
+            "app.queue.facebook.publish_page", return_value="post-2"
+        ) as publisher:
+            queue.process_claimed_post(self.db_path, post_id)
+        self.assertEqual([call.args[1] for call in reviewer.call_args_list], [first, second])
+        publisher.assert_called_once_with(database.get_post(self.db_path, post_id)["body"], [first, second])
+
+    def test_upload_and_remove_keeps_at_least_one_image(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        raw = BytesIO()
+        Image.new("RGB", (640, 320), "red").save(raw, "PNG")
+        response = self.client.post(f"/posts/{post_id}/images/upload", data={
+            "csrf_token": self.csrf, "image": (BytesIO(raw.getvalue()), "sample.png")
+        }, content_type="multipart/form-data", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual(len(images), 2)
+        self.assertEqual(images[1]["kind"], "upload")
+        self.client.post(f"/posts/{post_id}/images/{images[0]['id']}/remove", data={"csrf_token": self.csrf})
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 1)
+        with self.assertRaises(ValueError):
+            database.remove_post_image(self.db_path, post_id, images[1]["id"])
+
+    def test_rejected_second_image_blocks_whole_post(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        extra = BytesIO()
+        Image.new("RGB", (640, 320), "blue").save(extra, "JPEG")
+        media.save_post_image(self.db_path, post_id, extra.getvalue(), "", "upload")
+        self.assertTrue(database.claim_post(self.db_path, post_id))
+        with patch("app.queue.llm.check_post", side_effect=[(True, "OK"), (False, "Ảnh cần xem lại")]) as reviewer, patch(
+            "app.queue.facebook.publish_page"
+        ) as publisher:
+            queue.process_claimed_post(self.db_path, post_id)
+        self.assertEqual(reviewer.call_count, 2)
+        publisher.assert_not_called()
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "blocked")
+
+    def test_existing_single_image_is_migrated(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        with database.connect(self.db_path) as db:
+            db.execute("DROP TABLE post_images")
+        database.initialize(self.db_path)
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["image_file"], f"post-{post_id}.jpg")
+
+    def test_missing_image_prevents_publish(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.assertFalse(database.claim_post(self.db_path, post_id))
+        with self.assertRaises(ValueError):
+            database.schedule_post(self.db_path, post_id, "2026-10-24T03:00:00+00:00")
+        with patch("app.queue.llm.check_post") as reviewer, patch("app.queue.facebook.publish_page") as publisher:
+            queue.process_claimed_post(self.db_path, post_id)
+            reviewer.assert_not_called()
+            publisher.assert_not_called()
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "draft")
+
+    def test_publishes_exact_image_bytes_reviewed(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        image_path = self.attach_test_image(post_id)
+        original = image_path.read_bytes()
+        database.claim_post(self.db_path, post_id)
+
+        def change_image_after_review(body, image_bytes):
+            self.assertEqual(image_bytes, original)
+            Image.new("RGB", (64, 32), "blue").save(image_path, "JPEG")
+            return True, "Đạt"
+
+        with patch("app.queue.llm.check_post", side_effect=change_image_after_review), patch(
+            "app.queue.facebook.publish_page", return_value="post-1"
+        ) as publisher:
+            queue.process_claimed_post(self.db_path, post_id)
+        publisher.assert_called_once_with(database.get_post(self.db_path, post_id)["body"], original)
+
+    def test_prepare_source_image_and_fallback_card(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, [{
+            "title": "AI launch", "url": "https://example.com/story", "summary": "",
+            "published_at": "", "image_url": "https://cdn.example.com/cover.png",
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        output = BytesIO()
+        Image.new("RGB", (640, 320), "blue").save(output, "PNG")
+        with patch("app.media.fetch_public_bytes", return_value=(output.getvalue(), "https://cdn.example.com/cover.png")):
+            path = media.prepare_post_image(self.db_path, post_id)
+        self.assertTrue(path.is_file())
+        self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "source")
+        first_bytes = path.read_bytes()
+        with patch("app.media.fetch_public_bytes", side_effect=ValueError("source unavailable")):
+            replacement = media.prepare_post_image(self.db_path, post_id)
+        self.assertNotEqual(path, replacement)
+        self.assertEqual(path.read_bytes(), first_bytes)
+        self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "title_card")
+        with Image.open(replacement) as image:
+            self.assertEqual(image.size, (1200, 630))
+
+    def test_vision_review_includes_image_and_fails_closed(self):
+        image_path = self.db_path.parent / "photo.jpg"
+        Image.new("RGB", (640, 320), "red").save(image_path, "JPEG")
+        with patch.dict(os.environ, {"REUP_LLM_VISION_MODEL": "vision-test"}), patch(
+            "app.llm.request_chat", return_value='{"allowed": false, "reason": "Ảnh không phù hợp"}'
+        ) as request_chat:
+            self.assertEqual(llm.check_post("Text", image_path.read_bytes()), (False, "Ảnh không phù hợp"))
+        messages = request_chat.call_args.args[1]
+        self.assertEqual(request_chat.call_args.args[0], "vision-test")
+        self.assertTrue(messages[1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+
+    def test_facebook_photo_endpoint_uses_image_and_caption(self):
+        image_path = self.db_path.parent / "photo.jpg"
+        Image.new("RGB", (32, 32), "red").save(image_path, "JPEG")
+        settings = {
+            "REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
+            "REUP_META_GRAPH_VERSION": "v26.0",
+        }
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen", return_value=BytesIO(b'{"id":"photo-1","post_id":"post-1"}')) as send:
+            self.assertEqual(facebook.publish_page("A caption", image_path.read_bytes()), "post-1")
+        request = send.call_args.args[0]
+        self.assertEqual(request.full_url, "https://graph.facebook.com/v26.0/123/photos")
+        self.assertIn(b"A caption", request.data)
+        self.assertIn(b'name="source"', request.data)
+
+    def test_facebook_multiple_photos_attach_to_one_feed_post(self):
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
+                    "REUP_META_GRAPH_VERSION": "v26.0"}
+        first = b"\xff\xd8\xfffirst"
+        second = b"\xff\xd8\xffsecond"
+        responses = [BytesIO(b'{"id":"photo-1"}'), BytesIO(b'{"id":"photo-2"}'),
+                     BytesIO(b'{"id":"page_post-1"}')]
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen", side_effect=responses) as send:
+            self.assertEqual(facebook.publish_page("Caption", [first, second]), "page_post-1")
+        requests = [call.args[0] for call in send.call_args_list]
+        self.assertEqual([request.full_url.rsplit("/", 1)[-1] for request in requests],
+                         ["photos", "photos", "feed"])
+        self.assertTrue(all(b'name="published"\r\n\r\nfalse' in request.data for request in requests[:2]))
+        self.assertIn(first, requests[0].data)
+        self.assertIn(second, requests[1].data)
+        form = parse_qs(requests[2].data.decode())
+        self.assertEqual(form["message"], ["Caption"])
+        self.assertEqual(form["attached_media[0]"], ['{"media_fbid": "photo-1"}'])
+        self.assertEqual(form["attached_media[1]"], ['{"media_fbid": "photo-2"}'])
+
+    def test_github_post_uses_repository_screenshot(self):
+        with database.connect(self.db_path) as db:
+            db.execute("INSERT INTO sources (name, url, kind) VALUES (?, ?, ?)", ("GitHub", "https://github.com/trending", "github"))
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, [{
+            "title": "owner/project", "url": "https://github.com/owner/project", "summary": "",
+            "published_at": "", "image_url": "",
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        output = BytesIO()
+        Image.new("RGB", (1280, 900), "green").save(output, "PNG")
+        with patch("app.media.screenshot_repository", return_value=output.getvalue()) as screenshot:
+            media.prepare_post_image(self.db_path, post_id)
+            media.prepare_post_image(self.db_path, post_id, append=True)
+        self.assertEqual(screenshot.call_count, 2)
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+        self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "screenshot")
+
+    def test_image_fetch_rejects_private_network(self):
+        with self.assertRaises(ValueError):
+            media.validate_public_url("https://127.0.0.1/private.jpg")
+
+    def test_image_fetch_connects_to_vetted_ip(self):
+        with patch("app.media.validate_public_url", return_value="8.8.8.8"), patch("app.media.PinnedHTTPSConnection") as pinned:
+            response = pinned.return_value.getresponse.return_value
+            response.status = 200
+            response.read.return_value = b"image"
+            self.assertEqual(media.fetch_public_bytes("https://cdn.example.com/a.jpg", 10)[0], b"image")
+        pinned.assert_called_once_with("cdn.example.com", "8.8.8.8")
+
+    def test_image_preview_with_relative_database_path(self):
+        relative_db = self.db_path.relative_to(Path.cwd())
+        database.add_source(relative_db, "Example", "https://example.com/rss")
+        source_id = database.list_sources(relative_db)[0]["id"]
+        database.save_articles(relative_db, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(relative_db, database.list_articles(relative_db)[0]["id"])
+        self.attach_test_image(post_id)
+        app = create_app(relative_db)
+        response = app.test_client().get(f"/posts/{post_id}/image")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/jpeg")
+        response.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

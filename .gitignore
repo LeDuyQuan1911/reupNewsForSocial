@@ -1,0 +1,25 @@
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.ua/
+.understand-anything/
+.venv/
+__pycache__/
+*.py[cod]
+data/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

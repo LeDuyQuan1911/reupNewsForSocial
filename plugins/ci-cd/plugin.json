@@ -1,0 +1,5 @@
+{
+  "id": "ci-cd",
+  "name": "CI/CD",
+  "description": "Thiết lập kiểm tra CI và luồng triển khai CD khi có đích triển khai"
+}

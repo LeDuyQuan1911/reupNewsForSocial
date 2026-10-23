@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Tổng quan · reupNewsForSocial{% endblock %}
+{% block content %}
+<div class="page-actions">
+  <a class="secondary button-link" href="{{ url_for('workflow_page') }}">Xem luồng đăng →</a>
+  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not counts.sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
+</div>
+<section class="stat-grid" aria-label="Số liệu tổng quan">
+  <a class="stat-card" href="{{ url_for('articles_page') }}"><span>Bài đã tìm thấy</span><strong>{{ counts.articles }}</strong><small>Xem bài báo →</small></a>
+  <a class="stat-card" href="{{ url_for('sources_page') }}"><span>Nguồn đang theo dõi</span><strong>{{ counts.sources }}</strong><small>Quản lý nguồn →</small></a>
+  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Bản nháp</span><strong>{{ counts.get('draft', 0) }}</strong><small>Mở bài đăng →</small></a>
+  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Đã lên lịch</span><strong>{{ counts.get('scheduled', 0) }}</strong><small>Xem lịch đăng →</small></a>
+</section>
+{% if counts.get('uncertain', 0) %}<div class="notice error"><a href="{{ url_for('posts_page') }}">{{ counts.uncertain }} bài cần đối chiếu kết quả trên Facebook Page →</a></div>{% endif %}
+<div class="overview-grid">
+  <section class="panel"><div class="section-heading"><div><span class="eyebrow">KHÁM PHÁ</span><h2>Bài báo gần đây</h2></div><a class="section-link" href="{{ url_for('articles_page') }}">Xem tất cả →</a></div>
+    {% if articles %}<div class="compact-list">{% for article in articles %}<a href="{{ url_for('article_detail', article_id=article.id) }}"><span>{{ article.source_name }}</span><strong>{{ article.title }}</strong></a>{% endfor %}</div>
+    {% else %}<div class="empty-state"><h3>Chưa có bài báo</h3><p>Thêm nguồn rồi bấm “Tìm bài mới”.</p></div>{% endif %}
+  </section>
+  <section class="panel"><div class="section-heading"><div><span class="eyebrow">XUẤT BẢN</span><h2>Bài đăng gần đây</h2></div><a class="section-link" href="{{ url_for('posts_page') }}">Xem tất cả →</a></div>
+    {% if posts %}<div class="compact-list">{% for post in posts %}<a href="{{ url_for('edit_post', post_id=post.id) }}"><strong>{{ post.article_title }}</strong><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></a>{% endfor %}</div>
+    {% else %}<div class="empty-state"><h3>Chưa có bài đăng</h3><p>Chọn bài báo để tạo bản nháp đầu tiên.</p></div>{% endif %}
+  </section>
+</div>
+{% endblock %}

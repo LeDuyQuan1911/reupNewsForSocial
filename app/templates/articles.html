@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Bài báo · reupNewsForSocial{% endblock %}
+{% block content %}
+<div class="page-actions">
+  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
+</div>
+<form class="filter-bar" action="{{ url_for('articles_page') }}" method="get">
+  <label for="article-search">Tìm bài</label><input id="article-search" name="q" value="{{ search }}" placeholder="Tiêu đề hoặc tóm tắt">
+  <label for="article-source">Nguồn</label><select id="article-source" name="source"><option value="">Tất cả nguồn</option>{% for source in sources %}<option value="{{ source.id }}" {% if selected_source == source.id %}selected{% endif %}>{{ source.name }}</option>{% endfor %}</select>
+  <button class="secondary" type="submit">Lọc</button>
+</form>
+<section class="panel articles-panel"><div class="section-heading"><div><span class="eyebrow">DANH SÁCH</span><h2>Bài đã tìm thấy</h2></div><span class="count">{{ total }} bài</span></div>
+{% if articles %}<div class="article-list">{% for article in articles %}<article class="article"><div class="article-meta"><span>{{ article.source_name }}</span><span>·</span><span>{{ article.published_at[:10] if article.published_at else 'Mới tìm thấy' }}</span></div>
+  <h3><a href="{{ url_for('article_detail', article_id=article.id) }}">{{ article.title }}</a></h3>{% if article.summary %}<p>{{ article.summary }}</p>{% endif %}
+  <div class="article-actions"><a class="source-link" href="{{ article.url }}" target="_blank" rel="noopener noreferrer">Đọc bài gốc ↗</a>
+  {% if article.id not in posted_articles %}<form action="{{ url_for('draft_article', article_id=article.id) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-button" type="submit">Tạo bản nháp →</button></form>{% else %}<span class="draft-label">Đã có bản nháp</span>{% endif %}</div></article>{% endfor %}</div>
+{% else %}<div class="empty-state"><h3>Không tìm thấy bài phù hợp</h3><p>Thử đổi bộ lọc hoặc tìm bài mới từ nguồn tin.</p></div>{% endif %}</section>
+{% if total > page_size %}<nav class="pagination" aria-label="Trang bài báo">{% if page > 1 %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, page=page-1) }}">← Trang trước</a>{% endif %}<span>Trang {{ page }} / {{ (total + page_size - 1) // page_size }}</span>{% if page * page_size < total %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, page=page+1) }}">Trang sau →</a>{% endif %}</nav>{% endif %}
+{% endblock %}
