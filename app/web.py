@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
 
-from . import anthropic, database, feeds, github, llm, queue
+from . import anthropic, database, feeds, github, llm, media, queue
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -85,18 +85,50 @@ def create_app(database_path: Path | None = None) -> Flask:
     @app.post("/articles/<int:article_id>/draft")
     def draft_article(article_id):
         try:
-            database.make_draft(app.config["DATABASE_PATH"], article_id)
-            flash("Đã tạo bản nháp. Hãy kiểm tra nội dung trước khi lên lịch.", "success")
+            post_id = database.make_draft(app.config["DATABASE_PATH"], article_id)
         except ValueError as exc:
             flash(str(exc), "error")
-        return redirect(url_for("dashboard"))
+            return redirect(url_for("dashboard"))
+        post = database.get_post(app.config["DATABASE_PATH"], post_id)
+        if not post["image_file"]:
+            try:
+                media.prepare_post_image(app.config["DATABASE_PATH"], post_id)
+                flash("Đã tạo bản nháp và lưu ảnh minh họa.", "success")
+            except Exception as exc:
+                flash(f"Đã tạo bản nháp nhưng chưa lấy được ảnh: {exc}", "error")
+        return redirect(url_for("edit_post", post_id=post_id))
 
     @app.get("/posts/<int:post_id>")
     def edit_post(post_id):
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
         if post is None:
             abort(404)
-        return render_template("post.html", post=post)
+        try:
+            media.post_image_path(app.config["DATABASE_PATH"], post)
+            has_image = True
+        except media.MissingImageError:
+            has_image = False
+        return render_template("post.html", post=post, has_image=has_image)
+
+    @app.get("/posts/<int:post_id>/image")
+    def post_image(post_id):
+        post = database.get_post(app.config["DATABASE_PATH"], post_id)
+        if post is None:
+            abort(404)
+        try:
+            image_path = media.post_image_path(app.config["DATABASE_PATH"], post)
+        except media.MissingImageError:
+            abort(404)
+        return send_file(image_path.resolve(), mimetype="image/jpeg", max_age=0)
+
+    @app.post("/posts/<int:post_id>/image/refresh")
+    def refresh_post_image(post_id):
+        try:
+            media.prepare_post_image(app.config["DATABASE_PATH"], post_id)
+            flash("Đã lưu ảnh mới cho bài viết.", "success")
+        except Exception as exc:
+            flash(f"Không lấy được ảnh: {exc}", "error")
+        return redirect(url_for("edit_post", post_id=post_id))
 
     @app.post("/posts/<int:post_id>/save")
     def save_post(post_id):

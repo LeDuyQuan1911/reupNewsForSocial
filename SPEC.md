@@ -21,6 +21,8 @@ Trạng thái: **đang phát triển từng bước**. Stack cục bộ đã ch�
 - Bản đầu chạy trên máy cá nhân; cần đăng tự động lên Page, trang cá nhân và nhóm. LinkedIn là kênh dự kiến sau Facebook.
 - Nguồn ưu tiên gồm tin chính thức từ các hãng AI lớn và repo GitHub nổi bật. Cần chống đăng lặp trong thời gian ngắn.
 - Tham chiếu giọng viết: trang Facebook [Hỏi Dân it Offical](https://www.facebook.com/askITwithERIC), đặc biệt [bài mẫu về bản vá bảo mật](https://www.facebook.com/photo?fbid=1748385257291798&set=a.553695503427452). Đặc điểm: mở đầu gây chú ý, đoạn ngắn, chút hài hước của dân IT, nêu chi tiết kỹ thuật và việc người đọc nên làm. Không sao chép câu chữ và không tự thêm dữ kiện ngoài nguồn.
+- Bài đăng cần có ảnh: ưu tiên tải ảnh đại diện từ bài báo, tự chụp trang repo GitHub khi là tin về repo, và cho xem trước trên dashboard trước khi gửi lên Facebook. Nếu không truy cập được ảnh nguồn, tạo ảnh thẻ tiêu đề từ dữ kiện đã có.
+- Ảnh cũng phải đi qua bước kiểm duyệt bằng model nhìn ảnh trước khi đăng; nếu bước này lỗi hoặc không chắc chắn, hệ thống không gửi lên Facebook.
 
 ## Giới hạn kỹ thuật đang xác minh
 

@@ -37,8 +37,9 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `app/feeds.py` | Đọc và chuẩn hóa RSS/Atom |
 | `app/anthropic.py` | Đọc sitemap chính thức của Anthropic và metadata bài viết |
 | `app/github.py` | Tìm repo mới nổi qua GitHub Search API |
-| `app/llm.py` | Viết bản nháp và kiểm duyệt qua endpoint chat tương thích OpenAI |
+| `app/llm.py` | Viết bản nháp và kiểm duyệt văn bản/ảnh qua endpoint chat tương thích OpenAI |
 | `app/facebook.py` | Đăng lên Facebook Page qua Graph API |
+| `app/media.py` | Tìm ảnh bài báo, chụp repo, tạo ảnh dự phòng và lưu JPEG cục bộ |
 | `app/queue.py` | Xử lý bài đến lịch, trạng thái đăng và lỗi |
 | `app/database.py` | Schema SQLite, nguồn tin và bài báo |
 | `app/templates/`, `app/static/style.css` | Giao diện dashboard và biên tập |
@@ -46,4 +47,4 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `tests/test_app.py` | Kiểm tra parser, chống trùng và route cơ bản |
 | `data/reup.sqlite3` | Dữ liệu cục bộ, được Git bỏ qua |
 
-Luồng hiện tại: người dùng bấm “Tìm bài mới” → `app/web.py` gọi adapter RSS/Atom, Anthropic hoặc GitHub → mục được lưu theo URL duy nhất trong SQLite → dashboard hiển thị tối đa 100 mục mới được tìm thấy. Từ một mục, người dùng tạo bản nháp → có thể sửa hoặc gọi LLM viết lại → lên lịch hoặc đăng ngay → LLM kiểm duyệt → `app/facebook.py` gửi lên Page → cập nhật trạng thái. Chạy `python run.py`; kiểm tra `python -m unittest discover -s tests -v`.
+Luồng hiện tại: người dùng bấm “Tìm bài mới” → `app/web.py` gọi adapter RSS/Atom, Anthropic hoặc GitHub → mục được lưu theo URL duy nhất trong SQLite → dashboard hiển thị tối đa 100 mục mới được tìm thấy. Từ một mục, người dùng tạo bản nháp → `app/media.py` tải ảnh bài báo, chụp repo hoặc tạo ảnh thẻ tiêu đề và lưu trong `data/media/` → người dùng xem trước, sửa nội dung hoặc gọi LLM viết lại → lên lịch hoặc đăng ngay → LLM có khả năng xem ảnh kiểm duyệt cả caption và ảnh → `app/facebook.py` gửi ảnh và nội dung lên Page → cập nhật trạng thái. Chạy `python run.py`; kiểm tra `python -m unittest discover -s tests -v`.

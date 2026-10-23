@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS articles (
     title TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
     summary TEXT NOT NULL DEFAULT '',
+    image_url TEXT,
     published_at TEXT,
     discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -31,6 +32,9 @@ CREATE TABLE IF NOT EXISTS posts (
     published_at TEXT,
     platform_post_id TEXT,
     last_error TEXT,
+    image_file TEXT,
+    image_source_url TEXT,
+    image_kind TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_posts_schedule ON posts(status, scheduled_at);
@@ -63,6 +67,16 @@ def initialize(path: Path) -> None:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(sources)")}
         if "kind" not in columns:
             db.execute("ALTER TABLE sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'rss'")
+        article_columns = {row["name"] for row in db.execute("PRAGMA table_info(articles)")}
+        if "image_url" not in article_columns:
+            db.execute("ALTER TABLE articles ADD COLUMN image_url TEXT")
+        post_columns = {row["name"] for row in db.execute("PRAGMA table_info(posts)")}
+        if "image_file" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN image_file TEXT")
+        if "image_source_url" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN image_source_url TEXT")
+        if "image_kind" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN image_kind TEXT")
 
 
 def add_source(path: Path, name: str, url: str) -> None:
@@ -92,13 +106,20 @@ def list_articles(path: Path, limit: int = 100) -> list[sqlite3.Row]:
 
 def save_articles(path: Path, source_id: int, articles: list[dict[str, str]]) -> int:
     with connect(path) as db:
+        rows = [{**article, "source_id": source_id, "image_url": article.get("image_url", "")} for article in articles]
         before = db.total_changes
         db.executemany(
-            """INSERT OR IGNORE INTO articles (source_id, title, url, summary, published_at)
-               VALUES (:source_id, :title, :url, :summary, :published_at)""",
-            [{**article, "source_id": source_id} for article in articles],
+            """INSERT OR IGNORE INTO articles (source_id, title, url, summary, published_at, image_url)
+               VALUES (:source_id, :title, :url, :summary, :published_at, :image_url)""",
+            rows,
         )
-        return db.total_changes - before
+        added = db.total_changes - before
+        db.executemany(
+            """UPDATE articles SET image_url = :image_url WHERE url = :url
+               AND (image_url IS NULL OR image_url = '') AND :image_url != ''""",
+            rows,
+        )
+        return added
 
 
 def get_article(path: Path, article_id: int):
@@ -106,13 +127,14 @@ def get_article(path: Path, article_id: int):
         return db.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
 
 
-def make_draft(path: Path, article_id: int) -> None:
+def make_draft(path: Path, article_id: int) -> int:
     with connect(path) as db:
         article = db.execute("SELECT title, url FROM articles WHERE id = ?", (article_id,)).fetchone()
         if article is None:
             raise ValueError("Bài gốc không tồn tại")
         body = f"{article['title']}\n\nNguồn: {article['url']}"
         db.execute("INSERT OR IGNORE INTO posts (article_id, body) VALUES (?, ?)", (article_id, body))
+        return db.execute("SELECT id FROM posts WHERE article_id = ?", (article_id,)).fetchone()["id"]
 
 
 def list_posts(path: Path, limit: int = 50):
@@ -128,9 +150,23 @@ def get_post(path: Path, post_id: int):
     with connect(path) as db:
         return db.execute(
             """SELECT posts.*, articles.title AS article_title, articles.url AS article_url,
-                      articles.summary AS article_summary
-               FROM posts JOIN articles ON articles.id = posts.article_id WHERE posts.id = ?""", (post_id,)
+                      articles.summary AS article_summary, articles.image_url AS article_image_url,
+                      sources.kind AS source_kind, sources.name AS source_name
+               FROM posts JOIN articles ON articles.id = posts.article_id
+               JOIN sources ON sources.id = articles.source_id WHERE posts.id = ?""", (post_id,)
         ).fetchone()
+
+
+def attach_image(path: Path, post_id: int, image_file: str, source_url: str, kind: str = "source") -> None:
+    if kind not in {"source", "screenshot", "title_card"}:
+        raise ValueError("Loại ảnh không hợp lệ")
+    with connect(path) as db:
+        changed = db.execute(
+            "UPDATE posts SET image_file = ?, image_source_url = ?, image_kind = ? WHERE id = ? AND status IN ('draft', 'blocked', 'failed')",
+            (image_file, source_url, kind, post_id),
+        ).rowcount
+        if not changed:
+            raise ValueError("Không thể thay ảnh của bài đã lên lịch hoặc đã đăng")
 
 
 def recent_published_titles(path: Path, since_iso: str, exclude_post_id: int) -> list[str]:

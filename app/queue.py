@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 import re
 
-from . import database, facebook, llm
+from . import database, facebook, llm, media
 
 
 def now_utc() -> str:
@@ -27,7 +27,8 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         if any(similar_title(post["article_title"], title) for title in prior_titles):
             database.finish_post(path, post_id, "blocked", error="Tin tương tự đã được đăng trong 14 ngày gần đây")
             return
-        allowed, reason = llm.check_content(post["body"])
+        image_path = media.post_image_path(path, post)
+        allowed, reason = llm.check_post(post["body"], image_path)
         if not allowed:
             database.finish_post(path, post_id, "blocked", error=reason or "Nội dung cần xem lại")
             return
@@ -35,7 +36,7 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         database.finish_post(path, post_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
         return
     try:
-        platform_post_id = facebook.publish_page(post["body"])
+        platform_post_id = facebook.publish_page(post["body"], image_path)
     except facebook.PageConfigurationError as exc:
         database.finish_post(path, post_id, "failed", error=str(exc)[:500])
         return

@@ -19,7 +19,7 @@ class MetadataParser(HTMLParser):
             return
         values = dict(attrs)
         key = values.get("property", "")
-        if key in {"og:title", "og:description", "article:published_time"}:
+        if key in {"og:title", "og:description", "og:image", "article:published_time"}:
             self.metadata[key] = values.get("content", "")
 
 
@@ -57,5 +57,6 @@ def fetch_anthropic_news() -> list[dict[str, str]]:
                 "url": url,
                 "summary": metadata.get("og:description", "").strip()[:600],
                 "published_at": metadata.get("article:published_time", ""),
+                "image_url": metadata.get("og:image", ""),
             })
     return articles

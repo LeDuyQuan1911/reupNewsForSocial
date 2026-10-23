@@ -9,6 +9,13 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Lý do: ít thành phần cần vận hành trên máy cá nhân, đủ để kiểm chứng luồng nhập nguồn → tìm bài → hiển thị trước khi nối LLM và Facebook.
 - Hệ quả / khi nào xem lại: cần thiết kế thêm lịch đăng và xử lý tiến trình nền; nguồn không có RSS (như Anthropic) và repo GitHub sẽ có adapter riêng. Chưa chọn cơ chế đăng trang cá nhân/nhóm.
 
+### 2026-10-23 — Ảnh cho mỗi bài đăng
+
+- Bối cảnh: chủ dự án muốn bài đăng có ảnh từ bài báo hoặc ảnh chụp repo.
+- Quyết định: lưu một JPEG riêng cho mỗi bản nháp; ưu tiên ảnh nguồn, dùng Chrome headless chụp repo GitHub, và tạo ảnh thẻ tiêu đề khi nguồn chặn truy cập. Gửi ảnh kèm caption qua Facebook Page Photos API.
+- Lý do: ảnh đã lưu cục bộ giúp xem trước và giữ nguyên nội dung khi bài chờ lịch; ảnh dự phòng bảo đảm không đăng bài chỉ có chữ khi nguồn ảnh không khả dụng.
+- Hệ quả / khi nào xem lại: cần Chrome để chụp repo; chưa kiểm thử Photos API với token Page thật. Ảnh nguồn có thể thay đổi hoặc bị chặn, và người dùng cần kiểm tra ảnh trước khi đăng.
+
 ### 2026-10-22 — Merge main bằng PR thông thường
 
 - Bối cảnh: ruleset `Restrict updates` khiến PR hiện nút bypass; chủ repo muốn merge bằng nút thường mà vẫn là người duy nhất quyết định.

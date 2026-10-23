@@ -16,6 +16,19 @@
     {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}
     <div class="editor-grid">
       <section class="panel editor-panel">
+        <div class="image-panel">
+          <div class="section-heading"><div><span class="eyebrow">ẢNH MINH HỌA</span><h2>Ảnh của bài đăng</h2></div></div>
+          {% if has_image %}
+            <img class="post-image-preview" src="{{ url_for('post_image', post_id=post.id) }}" alt="Ảnh sẽ đăng cùng bài viết">
+            <p class="image-credit">{{ {'source':'Ảnh từ bài gốc','screenshot':'Ảnh chụp repo GitHub','title_card':'Ảnh thẻ tiêu đề tạo tự động'}.get(post.image_kind, 'Ảnh minh họa') }}{% if post.image_source_url %} · <a href="{{ post.image_source_url }}" target="_blank" rel="noopener noreferrer">Xem nguồn ↗</a>{% endif %}</p>
+          {% else %}<p class="muted image-empty">Chưa có ảnh. Bài sẽ không được đăng cho đến khi lấy được ảnh.</p>{% endif %}
+          {% if post.status in ['draft','blocked','failed'] %}
+          <form action="{{ url_for('refresh_post_image', post_id=post.id) }}" method="post" class="image-refresh">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="secondary" type="submit">{{ 'Lấy lại ảnh' if has_image else 'Lấy ảnh từ nguồn' }}</button>
+          </form>
+          {% endif %}
+        </div>
         <div class="section-heading"><div><span class="eyebrow">NỘI DUNG</span><h2>Bản nháp</h2></div><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></div>
         <form action="{{ url_for('save_post', post_id=post.id) }}" method="post" class="editor-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -34,7 +47,7 @@
         <section class="panel action-panel">
           <div class="section-heading"><div><span class="eyebrow">FACEBOOK PAGE</span><h2>Xuất bản</h2></div></div>
           <div class="action-content">
-            <p class="muted">Mọi bài đều được kiểm duyệt qua LLM ngay trước khi gửi. Kết quả không chắc chắn sẽ được giữ lại.</p>
+            <p class="muted">Nội dung và ảnh đều được model vision kiểm duyệt ngay trước khi gửi. Kết quả không chắc chắn sẽ được giữ lại.</p>
             {% if post.last_error %}<p class="last-error">{{ post.last_error }}</p>{% endif %}
             {% if post.scheduled_at %}<p class="schedule-info">Giờ đăng: <strong>{{ post.scheduled_at|bangkok_time }} (Bangkok)</strong></p>{% endif %}
             {% if post.status == 'uncertain' %}

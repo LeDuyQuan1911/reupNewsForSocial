@@ -17,6 +17,7 @@
 - [x] Tạo bản nháp, lên lịch/đăng ngay và adapter Facebook Page có bước kiểm duyệt LLM trước khi gửi.
 - [x] Chặn đăng tin có tiêu đề tương tự bài đã đăng trong 14 ngày gần đây.
 - [x] Review độc lập bản đầu và xử lý lỗi retry có thể đăng trùng sau timeout.
+- [x] Thêm ảnh từ bài báo, ảnh chụp repo hoặc ảnh thẻ tiêu đề; xem trước và chuẩn bị gửi ảnh cùng bài Page.
 
 ## Tiếp theo
 

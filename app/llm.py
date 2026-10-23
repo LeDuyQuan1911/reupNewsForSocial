@@ -2,19 +2,20 @@
 
 import json
 import os
+import base64
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 
-def chat(system: str, user: str, max_tokens: int = 600) -> str:
+def request_chat(model: str, messages: list[dict], max_tokens: int) -> str:
     base_url = os.environ.get("REUP_LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
-    model = os.environ.get("REUP_LLM_MODEL", "").strip()
     if not model:
-        raise ValueError("Chưa cấu hình REUP_LLM_MODEL")
+        raise ValueError("Chưa cấu hình model LLM")
     payload = json.dumps({
         "model": model,
         "temperature": 0.2,
         "max_tokens": max_tokens,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "messages": messages,
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     key = os.environ.get("REUP_LLM_API_KEY", "").strip()
@@ -27,6 +28,11 @@ def chat(system: str, user: str, max_tokens: int = 600) -> str:
     if not isinstance(content, str) or not content.strip():
         raise ValueError("LLM không trả nội dung hợp lệ")
     return content.strip()
+
+
+def chat(system: str, user: str, max_tokens: int = 600) -> str:
+    model = os.environ.get("REUP_LLM_MODEL", "").strip()
+    return request_chat(model, [{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens)
 
 
 def write_draft(title: str, summary: str, source_url: str) -> str:
@@ -52,8 +58,32 @@ def check_content(body: str) -> tuple[bool, str]:
         '{"allowed": true hoặc false, "reason": "lý do ngắn"}. Không thêm markdown.'
     )
     raw = chat(system, body, 160)
+    return parse_verdict(raw)
+
+
+def parse_verdict(raw: str) -> tuple[bool, str]:
     verdict = json.loads(raw)
     if not isinstance(verdict, dict) or type(verdict.get("allowed")) is not bool:
         raise ValueError("Kết quả kiểm duyệt không hợp lệ")
     reason = str(verdict.get("reason", "")).strip()[:300]
     return verdict["allowed"], reason
+
+
+def check_post(body: str, image_path: Path) -> tuple[bool, str]:
+    model = os.environ.get("REUP_LLM_VISION_MODEL", "").strip() or os.environ.get("REUP_LLM_MODEL", "").strip()
+    if not model:
+        raise ValueError("Chưa cấu hình REUP_LLM_VISION_MODEL hoặc REUP_LLM_MODEL")
+    image = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    system = (
+        "Kiểm duyệt cả văn bản và ảnh cho bài Facebook/LinkedIn. Chặn nội dung bạo lực, thù ghét, tình dục, bóc lột trẻ em, "
+        "quấy rối, lừa đảo, thông tin riêng tư và hình ảnh phản cảm. Nếu không xem được ảnh hoặc không chắc, trả allowed=false. "
+        'Chỉ trả JSON dạng {"allowed": true hoặc false, "reason": "lý do ngắn"}.'
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": [
+            {"type": "text", "text": body},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}", "detail": "low"}},
+        ]},
+    ]
+    return parse_verdict(request_chat(model, messages, 180))
