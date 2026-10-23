@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Biên tập bài · reupNewsForSocial</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar"><div class="brand"><span class="brand-mark">R</span><span>reupNewsForSocial</span></div><a class="back-link" href="{{ url_for('dashboard') }}">← Bảng tin</a></header>
+  <main class="shell editor-shell">
+    <a class="back-link" href="{{ url_for('dashboard') }}">← Quay lại bảng tin</a>
+    <span class="eyebrow editor-label">BIÊN TẬP BÀI ĐĂNG</span>
+    <h1>{{ post.article_title }}</h1>
+    <p class="editor-source"><a href="{{ post.article_url }}" target="_blank" rel="noopener noreferrer">Xem bài gốc ↗</a></p>
+    {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}
+    <div class="editor-grid">
+      <section class="panel editor-panel">
+        <div class="section-heading"><div><span class="eyebrow">NỘI DUNG</span><h2>Bản nháp</h2></div><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng'}.get(post.status,post.status) }}</span></div>
+        <form action="{{ url_for('save_post', post_id=post.id) }}" method="post" class="editor-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="post-body">Nội dung đăng Facebook</label>
+          <textarea id="post-body" name="body" rows="13" required {% if post.status in ['scheduled','publishing','published'] %}disabled{% endif %}>{{ post.body }}</textarea>
+          {% if post.status in ['draft','blocked','failed'] %}<button class="secondary" type="submit">Lưu bản nháp</button>{% endif %}
+        </form>
+        {% if post.status in ['draft','blocked','failed'] %}
+        <form action="{{ url_for('generate_post', post_id=post.id) }}" method="post" class="generate-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="text-button" type="submit">Viết lại bằng LLM ↗</button>
+        </form>
+        {% endif %}
+      </section>
+      <aside class="sidebar">
+        <section class="panel action-panel">
+          <div class="section-heading"><div><span class="eyebrow">FACEBOOK PAGE</span><h2>Xuất bản</h2></div></div>
+          <div class="action-content">
+            <p class="muted">Mọi bài đều được kiểm duyệt qua LLM ngay trước khi gửi. Kết quả không chắc chắn sẽ được giữ lại.</p>
+            {% if post.last_error %}<p class="last-error">{{ post.last_error }}</p>{% endif %}
+            {% if post.scheduled_at %}<p class="schedule-info">Giờ đăng: <strong>{{ post.scheduled_at|bangkok_time }} (Bangkok)</strong></p>{% endif %}
+            {% if post.status != 'published' and post.status != 'publishing' %}
+            {% if post.status == 'scheduled' %}
+            <form action="{{ url_for('unschedule_post', post_id=post.id) }}" method="post" class="schedule-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="secondary" type="submit">Hủy lịch để sửa bài</button>
+            </form>
+            {% else %}
+            <form action="{{ url_for('schedule_post', post_id=post.id) }}" method="post" class="schedule-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label for="scheduled-at">Giờ đăng (Asia/Bangkok)</label>
+              <input id="scheduled-at" name="scheduled_at" type="datetime-local" required>
+              <button class="secondary" type="submit">Lên lịch</button>
+            </form>
+            {% endif %}
+            <form action="{{ url_for('publish_now', post_id=post.id) }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="primary publish-button" type="submit">Đăng ngay lên Page ↗</button>
+            </form>
+            {% endif %}
+            {% if post.platform_post_id %}<p class="muted">Facebook post ID: {{ post.platform_post_id }}</p>{% endif %}
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

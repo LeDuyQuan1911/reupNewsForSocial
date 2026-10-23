@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reupNewsForSocial · Bảng tin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">R</span><span>reupNewsForSocial</span></div>
+    <span class="mode">Bản chạy trên máy cá nhân</span>
+  </header>
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <span class="eyebrow">BẢNG TIN</span>
+        <h1>Chọn tin đáng chia sẻ.</h1>
+        <p>Gom bài từ các nguồn RSS/Atom vào một nơi. Nội dung gốc luôn được dẫn về nguồn xuất bản.</p>
+      </div>
+      <form action="{{ url_for('discover') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm bài mới <span aria-hidden="true">↗</span></button>
+      </form>
+    </section>
+
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="notice {{ category }}" role="status">{{ message }}</div>
+    {% endfor %}
+
+    <div class="grid">
+      <section class="panel articles-panel">
+        <div class="section-heading">
+          <div><span class="eyebrow">KHÁM PHÁ</span><h2>Bài báo mới</h2></div>
+          <span class="count">{{ articles|length }} bài</span>
+        </div>
+        {% if articles %}
+          <div class="article-list">
+          {% for article in articles %}
+            <article class="article">
+              <div class="article-meta"><span>{{ article.source_name }}</span><span>·</span><span>{{ article.published_at[:10] if article.published_at else 'Mới tìm thấy' }}</span></div>
+              <h3><a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">{{ article.title }}</a></h3>
+              {% if article.summary %}<p>{{ article.summary }}</p>{% endif %}
+              <div class="article-actions">
+                <a class="source-link" href="{{ article.url }}" target="_blank" rel="noopener noreferrer">Đọc bài gốc <span aria-hidden="true">↗</span></a>
+                {% if article.id not in posted_articles %}
+                  <form action="{{ url_for('draft_article', article_id=article.id) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="text-button" type="submit">Tạo bản nháp →</button>
+                  </form>
+                {% else %}<span class="draft-label">Đã có bản nháp</span>{% endif %}
+              </div>
+            </article>
+          {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-state"><span class="empty-icon">✦</span><h3>Chưa có bài báo nào</h3><p>Thêm một nguồn tin rồi bấm “Tìm bài mới” để bắt đầu.</p></div>
+        {% endif %}
+      </section>
+
+      <aside class="sidebar">
+        <section class="panel queue-panel">
+          <div class="section-heading"><div><span class="eyebrow">XUẤT BẢN</span><h2>Hàng đợi bài viết</h2></div><span class="count">{{ posts|length }}</span></div>
+          {% if posts %}
+            <ul class="post-list">
+              {% for post in posts %}
+              <li><a href="{{ url_for('edit_post', post_id=post.id) }}"><strong>{{ post.article_title }}</strong><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng'}.get(post.status,post.status) }}</span></a></li>
+              {% endfor %}
+            </ul>
+          {% else %}<p class="muted queue-empty">Tạo bản nháp từ một bài trong bảng tin để bắt đầu.</p>{% endif %}
+        </section>
+        <section class="panel sources-panel">
+          <div class="section-heading"><div><span class="eyebrow">NGUỒN TIN</span><h2>Theo dõi</h2></div><span class="count">{{ sources|length }}</span></div>
+          {% if sources %}
+            <ul class="sources-list">
+              {% for source in sources %}<li><span class="source-dot"></span><div><strong>{{ source.name }}</strong><small>{{ source.url }}</small></div></li>{% endfor %}
+            </ul>
+          {% else %}<p class="muted">Chưa có nguồn tin. Bạn có thể thêm một RSS hoặc Atom feed bên dưới.</p>{% endif %}
+          <form class="add-source" action="{{ url_for('add_source') }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="source-name">Tên nguồn</label>
+            <input id="source-name" name="name" placeholder="Ví dụ: Báo công nghệ" required maxlength="100">
+            <label for="source-url">URL RSS/Atom</label>
+            <input id="source-url" name="url" type="url" placeholder="https://example.com/rss" required>
+            <button class="secondary" type="submit">+ Thêm nguồn tin</button>
+          </form>
+        </section>
+        <section class="next-step"><span class="eyebrow">LƯU Ý</span><h3>Kết nối xuất bản</h3><p>Đăng ngay và lên lịch hiện dùng Facebook Page. Bạn cần cấu hình LLM để kiểm duyệt và quyền đăng Page trước khi bài có thể xuất bản.</p></section>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>

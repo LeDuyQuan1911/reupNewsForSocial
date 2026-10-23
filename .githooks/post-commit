@@ -1,0 +1,4 @@
+#!/bin/sh
+if command -v node >/dev/null 2>&1; then
+  node scripts/mark-graph-stale.mjs || echo "[codebase-graph] Không đánh dấu được graph cũ; kiểm tra thủ công."
+fi
