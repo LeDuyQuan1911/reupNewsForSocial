@@ -14,6 +14,7 @@ def request_chat(model: str, messages: list[dict], max_tokens: int) -> str:
         "model": model,
         "temperature": 0.2,
         "max_tokens": max_tokens,
+        "stream": False,
         "messages": messages,
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}

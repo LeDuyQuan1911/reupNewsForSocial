@@ -15,6 +15,7 @@
     <nav class="app-nav" aria-label="Điều hướng chính">
       <a class="{{ 'active' if request.endpoint == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>Tổng quan</a>
       <a class="{{ 'active' if request.endpoint in ['articles_page', 'article_detail'] else '' }}" href="{{ url_for('articles_page') }}" {% if request.endpoint in ['articles_page', 'article_detail'] %}aria-current="page"{% endif %}>Bài báo</a>
+      <a class="{{ 'active' if request.endpoint == 'workflow_page' else '' }}" href="{{ url_for('workflow_page') }}" {% if request.endpoint == 'workflow_page' %}aria-current="page"{% endif %}>Luồng đăng</a>
       <a class="{{ 'active' if request.endpoint in ['posts_page', 'edit_post'] else '' }}" href="{{ url_for('posts_page') }}" {% if request.endpoint in ['posts_page', 'edit_post'] %}aria-current="page"{% endif %}>Bài đăng</a>
       <a class="{{ 'active' if request.endpoint == 'sources_page' else '' }}" href="{{ url_for('sources_page') }}" {% if request.endpoint == 'sources_page' %}aria-current="page"{% endif %}>Nguồn thông tin</a>
       <a class="{{ 'active' if request.endpoint == 'account_page' else '' }}" href="{{ url_for('account_page') }}" {% if request.endpoint == 'account_page' %}aria-current="page"{% endif %}>Tài khoản</a>

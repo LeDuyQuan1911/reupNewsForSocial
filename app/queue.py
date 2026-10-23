@@ -19,7 +19,7 @@ def similar_title(left: str, right: str) -> bool:
 
 def process_claimed_post(path: Path, post_id: int) -> None:
     post = database.get_post(path, post_id)
-    if post is None or post["status"] != "publishing":
+    if post is None or post["status"] != "publishing" or post["test_only"]:
         return
     try:
         since = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
@@ -27,17 +27,17 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         if any(similar_title(post["article_title"], title) for title in prior_titles):
             database.finish_post(path, post_id, "blocked", error="Tin tương tự đã được đăng trong 14 ngày gần đây")
             return
-        image_path = media.post_image_path(path, post)
-        image = image_path.read_bytes()
-        allowed, reason = llm.check_post(post["body"], image)
-        if not allowed:
-            database.finish_post(path, post_id, "blocked", error=reason or "Nội dung cần xem lại")
-            return
+        images = [image_path.read_bytes() for image_path in media.post_image_paths(path, post_id)]
+        for image in images:
+            allowed, reason = llm.check_post(post["body"], image)
+            if not allowed:
+                database.finish_post(path, post_id, "blocked", error=reason or "Nội dung hoặc ảnh cần xem lại")
+                return
     except Exception as exc:
         database.finish_post(path, post_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
         return
     try:
-        platform_post_id = facebook.publish_page(post["body"], image)
+        platform_post_id = facebook.publish_page(post["body"], images[0] if len(images) == 1 else images)
     except facebook.PageConfigurationError as exc:
         database.finish_post(path, post_id, "failed", error=str(exc)[:500])
         return

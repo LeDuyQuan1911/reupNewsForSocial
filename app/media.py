@@ -166,9 +166,10 @@ def title_card(title: str, source: str, article_url: str) -> bytes:
     return output.getvalue()
 
 
-def post_image_path(database_path: Path, post) -> Path:
+def post_image_path(database_path: Path, post, post_id: int | None = None) -> Path:
     image_file = post["image_file"] or ""
-    if not re.fullmatch(rf"post-{post['id']}(?:-[0-9a-f]{{32}})?\.jpg", image_file):
+    expected_post_id = post_id if post_id is not None else post["id"]
+    if not re.fullmatch(rf"post-{expected_post_id}(?:-[0-9a-f]{{32}})?\.jpg", image_file):
         raise MissingImageError("Bài chưa có ảnh được chuẩn bị")
     path = database_path.parent / "media" / image_file
     if not path.is_file():
@@ -176,7 +177,38 @@ def post_image_path(database_path: Path, post) -> Path:
     return path
 
 
-def prepare_post_image(database_path: Path, post_id: int) -> Path:
+def post_image_paths(database_path: Path, post_id: int) -> list[Path]:
+    images = database.list_post_images(database_path, post_id)
+    if not images:
+        raise MissingImageError("Bài đăng phải có ít nhất một ảnh")
+    return [post_image_path(database_path, image, post_id) for image in images]
+
+
+def save_post_image(database_path: Path, post_id: int, image: bytes, source_url: str,
+                    kind: str, append: bool = True) -> Path:
+    media_dir = database_path.parent / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    file_name = f"post-{post_id}-{uuid4().hex}.jpg"
+    target = media_dir / file_name
+    target.write_bytes(image)
+    try:
+        if append:
+            database.add_post_image(database_path, post_id, file_name, source_url, kind)
+        else:
+            database.attach_image(database_path, post_id, file_name, source_url, kind)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
+
+
+def save_uploaded_post_image(database_path: Path, post_id: int, raw: bytes) -> Path:
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("Ảnh tải lên phải có dữ liệu và không quá 8 MB")
+    return save_post_image(database_path, post_id, normalized_jpeg(raw), "", "upload")
+
+
+def prepare_post_image(database_path: Path, post_id: int, append: bool = False) -> Path:
     post = database.get_post(database_path, post_id)
     if post is None:
         raise ValueError("Bản nháp không tồn tại")
@@ -202,14 +234,4 @@ def prepare_post_image(database_path: Path, post_id: int) -> Path:
             source_url = post["article_url"]
             image = normalized_jpeg(title_card(post["article_title"], post["source_name"], source_url))
             kind = "title_card"
-    media_dir = database_path.parent / "media"
-    media_dir.mkdir(parents=True, exist_ok=True)
-    file_name = f"post-{post_id}-{uuid4().hex}.jpg"
-    target = media_dir / file_name
-    target.write_bytes(image)
-    try:
-        database.attach_image(database_path, post_id, file_name, source_url, kind)
-    except Exception:
-        target.unlink(missing_ok=True)
-        raise
-    return target
+    return save_post_image(database_path, post_id, image, source_url, kind, append=append)

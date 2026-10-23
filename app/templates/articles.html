@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
 {% block title %}Bài báo · reupNewsForSocial{% endblock %}
 {% block content %}
-<section class="page-heading"><div><span class="eyebrow">KHÁM PHÁ</span><h1>Bài báo</h1><p>Đọc tin đã tìm thấy và chọn bài để viết lại.</p></div>
+<div class="page-actions">
   <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
-</section>
+</div>
 <form class="filter-bar" action="{{ url_for('articles_page') }}" method="get">
   <label for="article-search">Tìm bài</label><input id="article-search" name="q" value="{{ search }}" placeholder="Tiêu đề hoặc tóm tắt">
   <label for="article-source">Nguồn</label><select id="article-source" name="source"><option value="">Tất cả nguồn</option>{% for source in sources %}<option value="{{ source.id }}" {% if selected_source == source.id %}selected{% endif %}>{{ source.name }}</option>{% endfor %}</select>

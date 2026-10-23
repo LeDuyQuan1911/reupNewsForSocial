@@ -19,6 +19,10 @@
 - [x] Review độc lập bản đầu và xử lý lỗi retry có thể đăng trùng sau timeout.
 - [x] Thêm ảnh từ bài báo, ảnh chụp repo hoặc ảnh thẻ tiêu đề; xem trước và chuẩn bị gửi ảnh cùng bài Page.
 - [x] Tách giao diện thành trang tổng quan, bài báo, bài đăng, nguồn thông tin và tài khoản/kết nối.
+- [x] Thêm trang luồng đăng thể hiện nguồn, bài báo, kênh Facebook Page và giờ hẹn/đã đăng.
+- [x] Thêm tiến trình quét nguồn theo giờ, tự chuẩn bị tối đa 6 bài/ngày và xếp giờ đăng khi có Page.
+- [x] Thử viết lại một bài và tạo ảnh AI, lên lịch thử nghiệm có cờ chặn gửi Facebook.
+- [x] Hỗ trợ 1–10 ảnh cho bài đăng, kiểm duyệt từng ảnh và gửi nhiều ảnh trong một bài Facebook Page.
 
 ## Tiếp theo
 

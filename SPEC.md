@@ -22,8 +22,12 @@ Trạng thái: **đang phát triển từng bước**. Stack cục bộ đã ch�
 - Nguồn ưu tiên gồm tin chính thức từ các hãng AI lớn và repo GitHub nổi bật. Cần chống đăng lặp trong thời gian ngắn.
 - Tham chiếu giọng viết: trang Facebook [Hỏi Dân it Offical](https://www.facebook.com/askITwithERIC), đặc biệt [bài mẫu về bản vá bảo mật](https://www.facebook.com/photo?fbid=1748385257291798&set=a.553695503427452). Đặc điểm: mở đầu gây chú ý, đoạn ngắn, chút hài hước của dân IT, nêu chi tiết kỹ thuật và việc người đọc nên làm. Không sao chép câu chữ và không tự thêm dữ kiện ngoài nguồn.
 - Bài đăng cần có ảnh: ưu tiên tải ảnh đại diện từ bài báo, tự chụp trang repo GitHub khi là tin về repo, và cho xem trước trên dashboard trước khi gửi lên Facebook. Nếu không truy cập được ảnh nguồn, tạo ảnh thẻ tiêu đề từ dữ kiện đã có.
+- Một bài đăng có thể chứa nhiều ảnh (tối đa 10 cho Facebook Page), thêm từ nguồn, ảnh chụp repo GitHub hoặc tải lên từ máy. Không cho xóa ảnh cuối cùng; bài không có ảnh hợp lệ không được lên lịch hoặc gửi. Mọi ảnh đều phải qua kiểm duyệt trước khi gửi.
 - Giao diện cục bộ cần các trang riêng cho tổng quan, tài khoản/kết nối, nguồn thông tin và bài báo; bài đăng và biên tập có trang riêng để danh sách tin không bị gộp vào một màn hình.
+- Giao diện cần một luồng trực quan nối nguồn tin → bài báo → kênh đăng → thời điểm dự kiến/thực tế. Bài chưa có nháp hoặc chưa có lịch phải hiển thị trạng thái tương ứng; không thể hiện kênh chưa tích hợp như thể đã có thể đăng.
+- Có thể lên lịch thử nghiệm cho một bài đã viết lại và có ảnh AI. Bài thử hiển thị giờ hẹn nhưng không được bộ chạy lịch hoặc nút đăng ngay gửi lên Facebook.
 - Ảnh cũng phải đi qua bước kiểm duyệt bằng model nhìn ảnh trước khi đăng; nếu bước này lỗi hoặc không chắc chắn, hệ thống không gửi lên Facebook.
+- Luồng tìm tin, viết bài và xếp lịch cần chạy tự động trên máy cá nhân, tối đa 6 bài/ngày. Người dùng chưa có Page ID/token nên phần gửi thật chỉ có thể hoạt động sau khi kết nối Page.
 
 ## Giới hạn kỹ thuật đang xác minh
 

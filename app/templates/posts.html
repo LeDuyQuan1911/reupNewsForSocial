@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Bài đăng · reupNewsForSocial{% endblock %}
 {% block content %}
-<section class="page-heading"><div><span class="eyebrow">XUẤT BẢN</span><h1>Bài đăng</h1><p>Theo dõi bản nháp, lịch đăng và kết quả đăng Facebook Page.</p></div><a class="secondary button-link" href="{{ url_for('articles_page') }}">Chọn bài báo →</a></section>
+<div class="page-actions"><a class="secondary button-link" href="{{ url_for('articles_page') }}">Chọn bài báo →</a></div>
 <section class="panel"><div class="section-heading"><h2>Hàng đợi và lịch sử</h2><span class="count">{{ total }} bài</span></div>
 {% if posts %}<div class="post-rows">{% for post in posts %}<a class="post-row" href="{{ url_for('edit_post', post_id=post.id) }}"><div><strong>{{ post.article_title }}</strong><small>{% if post.scheduled_at %}Lịch đăng: {{ post.scheduled_at|bangkok_time }}{% elif post.published_at %}Đã đăng: {{ post.published_at|bangkok_time }}{% else %}Tạo: {{ post.created_at[:16] }}{% endif %}</small></div><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></a>{% endfor %}</div>
 {% else %}<div class="empty-state"><h3>Chưa có bài đăng</h3><p>Chọn một bài báo để tạo bản nháp.</p></div>{% endif %}</section>

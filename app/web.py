@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
 
-from . import anthropic, database, feeds, github, llm, media, queue
+from . import automation, database, discovery, feeds, llm, media, queue
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -96,9 +96,28 @@ def create_app(database_path: Path | None = None) -> Flask:
             app.config["DATABASE_PATH"], limit=page_size, offset=(page - 1) * page_size
         ), page=page, total=total, page_size=page_size)
 
+    @app.get("/workflow")
+    def workflow_page():
+        page_size = 25
+        selected_view = "all" if request.args.get("view") == "all" else "posts"
+        article_total = database.count_articles(app.config["DATABASE_PATH"])
+        post_total = database.count_posts(app.config["DATABASE_PATH"])
+        total = article_total if selected_view == "all" else post_total
+        page_value = request.args.get("page", "1")
+        requested_page = int(page_value) if page_value.isdecimal() and len(page_value) <= 10 else 1
+        page = min(max(1, requested_page), max(1, (total + page_size - 1) // page_size))
+        workflows = database.list_publication_workflows(
+            app.config["DATABASE_PATH"], limit=page_size, offset=(page - 1) * page_size,
+            with_post_only=selected_view == "posts"
+        )
+        return render_template("workflow.html", workflows=workflows, page=page,
+                               total=total, page_size=page_size, selected_view=selected_view,
+                               article_total=article_total, post_total=post_total)
+
     @app.get("/account")
     def account_page():
-        return render_template("account.html", connections={
+        return render_template("account.html", automation_status=database.automation_status(app.config["DATABASE_PATH"]),
+                               automation_enabled=automation.enabled(), connections={
             "page": bool(os.environ.get("REUP_FACEBOOK_PAGE_ID") and os.environ.get("REUP_FACEBOOK_PAGE_TOKEN")),
             "llm": bool(os.environ.get("REUP_LLM_MODEL")),
             "vision": bool(os.environ.get("REUP_LLM_VISION_MODEL")),
@@ -120,19 +139,7 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.post("/discover")
     def discover():
-        added = 0
-        errors = []
-        for source in database.list_sources(app.config["DATABASE_PATH"]):
-            try:
-                if source["kind"] == "github":
-                    articles = github.fetch_popular_repositories()
-                elif source["kind"] == "anthropic":
-                    articles = anthropic.fetch_anthropic_news()
-                else:
-                    articles = feeds.fetch_feed(source["url"])[:50]
-                added += database.save_articles(app.config["DATABASE_PATH"], source["id"], articles)
-            except (OSError, ValueError) as exc:
-                errors.append(f"{source['name']}: {exc}")
+        added, errors = discovery.scan_sources(app.config["DATABASE_PATH"])
         flash(f"Đã tìm thấy {added} bài mới.", "success")
         for error in errors:
             flash(error, "error")
@@ -146,7 +153,7 @@ def create_app(database_path: Path | None = None) -> Flask:
             flash(str(exc), "error")
             return redirect(url_for("articles_page"))
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
-        if not post["image_file"]:
+        if not database.list_post_images(app.config["DATABASE_PATH"], post_id):
             try:
                 media.prepare_post_image(app.config["DATABASE_PATH"], post_id)
                 flash("Đã tạo bản nháp và lưu ảnh minh họa.", "success")
@@ -159,12 +166,13 @@ def create_app(database_path: Path | None = None) -> Flask:
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
         if post is None:
             abort(404)
+        images = database.list_post_images(app.config["DATABASE_PATH"], post_id)
         try:
-            media.post_image_path(app.config["DATABASE_PATH"], post)
+            media.post_image_paths(app.config["DATABASE_PATH"], post_id)
             has_image = True
         except media.MissingImageError:
             has_image = False
-        return render_template("post.html", post=post, has_image=has_image)
+        return render_template("post.html", post=post, images=images, has_image=has_image)
 
     @app.get("/posts/<int:post_id>/image")
     def post_image(post_id):
@@ -177,13 +185,46 @@ def create_app(database_path: Path | None = None) -> Flask:
             abort(404)
         return send_file(image_path.resolve(), mimetype="image/jpeg", max_age=0)
 
+    @app.get("/posts/<int:post_id>/images/<int:image_id>")
+    def post_image_item(post_id, image_id):
+        image = database.get_post_image(app.config["DATABASE_PATH"], post_id, image_id)
+        if image is None:
+            abort(404)
+        try:
+            image_path = media.post_image_path(app.config["DATABASE_PATH"], image, post_id)
+        except media.MissingImageError:
+            abort(404)
+        return send_file(image_path.resolve(), mimetype="image/jpeg", max_age=0)
+
     @app.post("/posts/<int:post_id>/image/refresh")
     def refresh_post_image(post_id):
         try:
-            media.prepare_post_image(app.config["DATABASE_PATH"], post_id)
-            flash("Đã lưu ảnh mới cho bài viết.", "success")
+            media.prepare_post_image(app.config["DATABASE_PATH"], post_id, append=True)
+            flash("Đã thêm ảnh từ nguồn vào bài viết.", "success")
         except Exception as exc:
             flash(f"Không lấy được ảnh: {exc}", "error")
+        return redirect(url_for("edit_post", post_id=post_id))
+
+    @app.post("/posts/<int:post_id>/images/upload")
+    def upload_post_image(post_id):
+        file = request.files.get("image")
+        try:
+            if not file or not file.filename:
+                raise ValueError("Chọn một ảnh để tải lên")
+            raw = file.stream.read(media.MAX_IMAGE_BYTES + 1)
+            media.save_uploaded_post_image(app.config["DATABASE_PATH"], post_id, raw)
+            flash("Đã thêm ảnh vào bài viết.", "success")
+        except (ValueError, OSError) as exc:
+            flash(f"Không thêm được ảnh: {exc}", "error")
+        return redirect(url_for("edit_post", post_id=post_id))
+
+    @app.post("/posts/<int:post_id>/images/<int:image_id>/remove")
+    def remove_post_image(post_id, image_id):
+        try:
+            database.remove_post_image(app.config["DATABASE_PATH"], post_id, image_id)
+            flash("Đã bỏ ảnh khỏi bài viết.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
         return redirect(url_for("edit_post", post_id=post_id))
 
     @app.post("/posts/<int:post_id>/save")
@@ -218,15 +259,17 @@ def create_app(database_path: Path | None = None) -> Flask:
     @app.post("/posts/<int:post_id>/schedule")
     def schedule_post(post_id):
         try:
+            media.post_image_paths(app.config["DATABASE_PATH"], post_id)
             local_time = datetime.fromisoformat(request.form.get("scheduled_at", ""))
             if local_time.tzinfo is not None:
                 raise ValueError("Nhập giờ địa phương không kèm múi giờ")
             utc_time = local_time.replace(tzinfo=BANGKOK).astimezone(timezone.utc)
             if utc_time <= datetime.now(timezone.utc):
                 raise ValueError("Giờ đăng phải ở tương lai")
-            database.schedule_post(app.config["DATABASE_PATH"], post_id, utc_time.isoformat())
-            flash("Đã lên lịch đăng lên Facebook Page.", "success")
-        except ValueError as exc:
+            test_only = request.form.get("test_only") == "yes"
+            database.schedule_post(app.config["DATABASE_PATH"], post_id, utc_time.isoformat(), test_only=test_only)
+            flash("Đã lên lịch thử nghiệm; bài sẽ không được gửi lên Facebook." if test_only else "Đã lên lịch đăng lên Facebook Page.", "success")
+        except (ValueError, media.MissingImageError) as exc:
             flash(f"Không lên lịch được: {exc}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
 

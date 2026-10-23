@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}Tổng quan · reupNewsForSocial{% endblock %}
 {% block content %}
-<section class="page-heading"><div><span class="eyebrow">TỔNG QUAN</span><h1>Bàn điều khiển</h1><p>Xem tin mới, bài đang chờ đăng và trạng thái hệ thống tại một nơi.</p></div>
+<div class="page-actions">
+  <a class="secondary button-link" href="{{ url_for('workflow_page') }}">Xem luồng đăng →</a>
   <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not counts.sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
-</section>
+</div>
 <section class="stat-grid" aria-label="Số liệu tổng quan">
   <a class="stat-card" href="{{ url_for('articles_page') }}"><span>Bài đã tìm thấy</span><strong>{{ counts.articles }}</strong><small>Xem bài báo →</small></a>
   <a class="stat-card" href="{{ url_for('sources_page') }}"><span>Nguồn đang theo dõi</span><strong>{{ counts.sources }}</strong><small>Quản lý nguồn →</small></a>

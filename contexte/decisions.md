@@ -2,6 +2,27 @@
 
 Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 
+### 2026-10-23 — Nhiều ảnh cho một bài đăng
+
+- Bối cảnh: chủ dự án muốn nhiều ảnh trong một bài, tối thiểu một ảnh, kể cả ảnh chụp repo GitHub.
+- Quyết định: thêm bảng `post_images` và tự chuyển ảnh đơn hiện có khi nâng cấp. Giữ các cột ảnh cũ làm ảnh đầu để tương thích. Bản nháp nhận tối đa 10 ảnh, không được bỏ ảnh cuối; lịch và thao tác đăng đòi ít nhất một ảnh. Kiểm duyệt từng ảnh; với nhiều ảnh, tải ảnh chưa xuất bản rồi tạo một bài Page qua `attached_media`.
+- Lý do: giữ dữ liệu cũ và đảm bảo toàn bộ ảnh gắn với bài đăng được kiểm tra trước khi gửi.
+- Hệ quả / khi nào xem lại: chưa kiểm tra lời gọi nhiều ảnh với Page token thật; lỗi khi đang tải ảnh được giữ ở trạng thái cần đối chiếu để tránh gửi trùng.
+
+### 2026-10-23 — Lịch thử nghiệm không đăng
+
+- Bối cảnh: cần xem trước một bài viết lại bằng AI cùng ảnh minh họa và giờ hẹn, nhưng chưa gửi lên Facebook.
+- Quyết định: lưu cờ `test_only` trên bài đăng; hàng đợi và thao tác đăng ngay đều bỏ qua bài mang cờ này. Giao diện phân biệt lịch thử nghiệm với lịch đăng thật; hủy lịch xóa cờ.
+- Lý do: bảo đảm bài thử vẫn an toàn khi sau này bổ sung Page ID/token hoặc tới giờ hẹn.
+- Hệ quả / khi nào xem lại: lịch thử nghiệm không chiếm khung đăng tự động; cần hủy lịch rồi đặt lịch thật nếu muốn xuất bản.
+
+### 2026-10-23 — Tự động hóa tối đa sáu bài mỗi ngày
+
+- Bối cảnh: chủ dự án muốn luồng tìm, viết và đăng không cần thao tác từng bài; hiện chưa có Page ID/token.
+- Quyết định: tiến trình nền quét nguồn mỗi giờ, chuẩn bị tối đa sáu bài đạt mỗi ngày theo giờ Bangkok, chỉ xét tin được phát hiện và đăng trong 48 giờ gần đây, kể cả tin đã lưu trước khi bật nếu chưa có bản nháp. Tạo ảnh, viết và kiểm duyệt trước khi xếp vào sáu khung giờ ban ngày; chỉ xếp lịch khi có cấu hình Page. Bài lỗi/bị chặn giữ lại và không tự gửi; lỗi tạm thời thử lại tối đa ba lần, sau đó có thể chọn bài khác để bù khung còn trống.
+- Lý do: giới hạn lượng bài và độ cũ, tránh tự đăng nội dung chưa qua kiểm duyệt hoặc từ nguồn lỗi; giữ nguyên bài thủ công và cơ chế chống đăng trùng hiện tại.
+- Hệ quả / khi nào xem lại: tiến trình chỉ chạy khi `run.py` và 9Router còn hoạt động. Chưa kiểm chứng gửi thật lên Facebook Page; cần Page ID/token và kiểm tra quyền API trước khi sử dụng ngoài máy.
+
 ### 2026-10-23 — Bắt đầu bằng dashboard cục bộ
 
 - Bối cảnh: chủ dự án muốn tìm bài báo, xem trên dashboard và về sau đăng theo lịch hoặc đăng ngay; bản đầu chạy trên máy cá nhân.

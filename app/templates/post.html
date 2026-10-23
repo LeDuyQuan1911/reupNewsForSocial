@@ -9,19 +9,31 @@
     <div class="editor-grid">
       <section class="panel editor-panel">
         <div class="image-panel">
-          <div class="section-heading"><div><span class="eyebrow">ẢNH MINH HỌA</span><h2>Ảnh của bài đăng</h2></div></div>
-          {% if has_image %}
-            <img class="post-image-preview" src="{{ url_for('post_image', post_id=post.id) }}" alt="Ảnh sẽ đăng cùng bài viết">
-            <p class="image-credit">{{ {'source':'Ảnh từ bài gốc','screenshot':'Ảnh chụp repo GitHub','title_card':'Ảnh thẻ tiêu đề tạo tự động'}.get(post.image_kind, 'Ảnh minh họa') }}{% if post.image_source_url %} · <a href="{{ post.image_source_url }}" target="_blank" rel="noopener noreferrer">Xem nguồn ↗</a>{% endif %}</p>
-          {% else %}<p class="muted image-empty">Chưa có ảnh. Bài sẽ không được đăng cho đến khi lấy được ảnh.</p>{% endif %}
-          {% if post.status in ['draft','blocked','failed'] %}
-          <form action="{{ url_for('refresh_post_image', post_id=post.id) }}" method="post" class="image-refresh">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="secondary" type="submit">{{ 'Lấy lại ảnh' if has_image else 'Lấy ảnh từ nguồn' }}</button>
-          </form>
+          <div class="section-heading"><div><span class="eyebrow">ẢNH MINH HỌA</span><h2>Ảnh của bài đăng ({{ images|length }}/10)</h2></div></div>
+          {% if not has_image %}<p class="muted image-empty">Bài cần ít nhất một ảnh hợp lệ trước khi lên lịch hoặc đăng.</p>{% endif %}
+          {% if images %}<div class="post-image-grid">
+            {% for image in images %}<div class="post-image-item">
+              <img class="post-image-preview" src="{{ url_for('post_image_item', post_id=post.id, image_id=image.id) }}" alt="Ảnh {{ loop.index }} của bài đăng">
+              <p class="image-credit">{{ {'source':'Ảnh từ bài gốc','screenshot':'Ảnh chụp repo GitHub','title_card':'Ảnh thẻ tiêu đề tạo tự động','ai_generated':'Ảnh minh họa tạo bằng AI','upload':'Ảnh tải lên'}.get(image.kind, 'Ảnh minh họa') }}{% if image.source_url %} · <a href="{{ image.source_url }}" target="_blank" rel="noopener noreferrer">Xem nguồn ↗</a>{% endif %}</p>
+              {% if post.status in ['draft','blocked','failed'] and images|length > 1 %}<form action="{{ url_for('remove_post_image', post_id=post.id, image_id=image.id) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-button" type="submit">Bỏ ảnh này</button></form>{% endif %}
+            </div>{% endfor %}
+          </div>{% endif %}
+          {% if post.status in ['draft','blocked','failed'] and images|length < 10 %}
+            <div class="image-actions">
+              <form action="{{ url_for('refresh_post_image', post_id=post.id) }}" method="post" class="image-refresh">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="secondary" type="submit">{{ 'Chụp thêm ảnh repo' if post.source_kind == 'github' else 'Thêm ảnh từ nguồn' }}</button>
+              </form>
+              <form action="{{ url_for('upload_post_image', post_id=post.id) }}" method="post" enctype="multipart/form-data" class="image-upload">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label for="upload-image">Thêm ảnh từ máy (JPEG/PNG/WebP, tối đa 8 MB)</label>
+                <input id="upload-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+                <button class="secondary" type="submit">Tải ảnh lên</button>
+              </form>
+            </div>
           {% endif %}
         </div>
-        <div class="section-heading"><div><span class="eyebrow">NỘI DUNG</span><h2>Bản nháp</h2></div><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></div>
+        <div class="section-heading"><div><span class="eyebrow">NỘI DUNG</span><h2>Bản nháp</h2></div><span class="post-status {{ post.status }}">{{ 'Lịch thử nghiệm · không đăng' if post.test_only and post.status == 'scheduled' else {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></div>
         <form action="{{ url_for('save_post', post_id=post.id) }}" method="post" class="editor-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label for="post-body">Nội dung đăng Facebook</label>
@@ -41,7 +53,8 @@
           <div class="action-content">
             <p class="muted">Nội dung và ảnh đều được model vision kiểm duyệt ngay trước khi gửi. Kết quả không chắc chắn sẽ được giữ lại.</p>
             {% if post.last_error %}<p class="last-error">{{ post.last_error }}</p>{% endif %}
-            {% if post.scheduled_at %}<p class="schedule-info">Giờ đăng: <strong>{{ post.scheduled_at|bangkok_time }} (Bangkok)</strong></p>{% endif %}
+            {% if post.scheduled_at %}<p class="schedule-info">{{ 'Giờ thử nghiệm' if post.test_only else 'Giờ đăng' }}: <strong>{{ post.scheduled_at|bangkok_time }} (Bangkok)</strong></p>{% endif %}
+            {% if post.test_only %}<p class="muted">Lịch thử nghiệm: hệ thống giữ bài tại đây và không gửi lên Facebook Page.</p>{% endif %}
             {% if post.status == 'uncertain' %}
             <form action="{{ url_for('resolve_post', post_id=post.id) }}" method="post" class="schedule-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -61,13 +74,14 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <label for="scheduled-at">Giờ đăng (Asia/Bangkok)</label>
               <input id="scheduled-at" name="scheduled_at" type="datetime-local" required>
+              <label><input name="test_only" type="checkbox" value="yes"> Lịch thử nghiệm, không đăng</label>
               <button class="secondary" type="submit">Lên lịch</button>
             </form>
             {% endif %}
-            <form action="{{ url_for('publish_now', post_id=post.id) }}" method="post">
+            {% if not post.test_only %}<form action="{{ url_for('publish_now', post_id=post.id) }}" method="post">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="primary publish-button" type="submit">Đăng ngay lên Page ↗</button>
-            </form>
+            </form>{% endif %}
             {% endif %}
             {% if post.platform_post_id %}<p class="muted">Facebook post ID: {{ post.platform_post_id }}</p>{% endif %}
           </div>
