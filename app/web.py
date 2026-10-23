@@ -39,14 +39,62 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.get("/")
     def dashboard():
-        posts = database.list_posts(app.config["DATABASE_PATH"])
         return render_template(
             "dashboard.html",
-            sources=database.list_sources(app.config["DATABASE_PATH"]),
-            articles=database.list_articles(app.config["DATABASE_PATH"]),
-            posts=posts,
-            posted_articles={post["article_id"] for post in posts},
+            counts=database.overview_counts(app.config["DATABASE_PATH"]),
+            articles=database.list_articles(app.config["DATABASE_PATH"], limit=6),
+            posts=database.list_posts(app.config["DATABASE_PATH"], limit=6),
         )
+
+    @app.get("/articles")
+    def articles_page():
+        source_value = request.args.get("source", "")
+        source_id = int(source_value) if source_value.isdecimal() else None
+        search = request.args.get("q", "").strip()[:100]
+        page_value = request.args.get("page", "1")
+        page = max(1, int(page_value)) if page_value.isdecimal() else 1
+        page_size = 25
+        total = database.count_articles(app.config["DATABASE_PATH"], source_id, search)
+        posts = database.list_posts(app.config["DATABASE_PATH"], limit=10000)
+        return render_template(
+            "articles.html",
+            articles=database.list_articles(app.config["DATABASE_PATH"], limit=page_size,
+                                            source_id=source_id, search=search, offset=(page - 1) * page_size),
+            sources=database.list_sources(app.config["DATABASE_PATH"]),
+            posted_articles={post["article_id"] for post in posts},
+            selected_source=source_id,
+            search=search,
+            page=page,
+            total=total,
+            page_size=page_size,
+        )
+
+    @app.get("/articles/<int:article_id>")
+    def article_detail(article_id):
+        article = database.get_article(app.config["DATABASE_PATH"], article_id)
+        if article is None:
+            abort(404)
+        post = next((item for item in database.list_posts(app.config["DATABASE_PATH"], limit=10000)
+                     if item["article_id"] == article_id), None)
+        source = next((item for item in database.list_sources(app.config["DATABASE_PATH"])
+                       if item["id"] == article["source_id"]), None)
+        return render_template("article.html", article=article, source=source, post=post)
+
+    @app.get("/sources")
+    def sources_page():
+        return render_template("sources.html", sources=database.list_sources(app.config["DATABASE_PATH"]))
+
+    @app.get("/posts")
+    def posts_page():
+        return render_template("posts.html", posts=database.list_posts(app.config["DATABASE_PATH"], limit=10000))
+
+    @app.get("/account")
+    def account_page():
+        return render_template("account.html", connections={
+            "page": bool(os.environ.get("REUP_FACEBOOK_PAGE_ID") and os.environ.get("REUP_FACEBOOK_PAGE_TOKEN")),
+            "llm": bool(os.environ.get("REUP_LLM_MODEL")),
+            "vision": bool(os.environ.get("REUP_LLM_VISION_MODEL")),
+        })
 
     @app.post("/sources")
     def add_source():
@@ -60,7 +108,7 @@ def create_app(database_path: Path | None = None) -> Flask:
                 flash("Đã thêm nguồn tin.", "success")
             except sqlite3.IntegrityError:
                 flash("Nguồn tin này đã tồn tại.", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("sources_page"))
 
     @app.post("/discover")
     def discover():
@@ -80,7 +128,7 @@ def create_app(database_path: Path | None = None) -> Flask:
         flash(f"Đã tìm thấy {added} bài mới.", "success")
         for error in errors:
             flash(error, "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("articles_page"))
 
     @app.post("/articles/<int:article_id>/draft")
     def draft_article(article_id):
@@ -88,7 +136,7 @@ def create_app(database_path: Path | None = None) -> Flask:
             post_id = database.make_draft(app.config["DATABASE_PATH"], article_id)
         except ValueError as exc:
             flash(str(exc), "error")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("articles_page"))
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
         if not post["image_file"]:
             try:

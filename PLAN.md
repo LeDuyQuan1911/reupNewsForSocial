@@ -18,6 +18,7 @@
 - [x] Chặn đăng tin có tiêu đề tương tự bài đã đăng trong 14 ngày gần đây.
 - [x] Review độc lập bản đầu và xử lý lỗi retry có thể đăng trùng sau timeout.
 - [x] Thêm ảnh từ bài báo, ảnh chụp repo hoặc ảnh thẻ tiêu đề; xem trước và chuẩn bị gửi ảnh cùng bài Page.
+- [x] Tách giao diện thành trang tổng quan, bài báo, bài đăng, nguồn thông tin và tài khoản/kết nối.
 
 ## Tiếp theo
 

@@ -56,6 +56,25 @@ class DashboardTests(unittest.TestCase):
         self.client.post("/sources", data={"csrf_token": self.csrf, "name": "Example", "url": "https://example.com/rss"})
         self.assertEqual(len(database.list_sources(self.db_path)), 1)
 
+    def test_separate_pages_and_article_filters(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        article_id = database.list_articles(self.db_path)[0]["id"]
+        for route, heading in (("/", "Bàn điều khiển"), ("/articles", "Bài báo"),
+                               ("/sources", "Nguồn thông tin"), ("/posts", "Bài đăng"),
+                               ("/account", "Tài khoản & kết nối"),
+                               (f"/articles/{article_id}", "AI &amp; tools")):
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 200, route)
+            self.assertIn(heading, response.data.decode(), route)
+            self.assertIn('aria-label="Điều hướng chính"', response.data.decode(), route)
+        self.assertEqual(self.client.get("/articles/99999").status_code, 404)
+        self.assertIn("AI &amp; tools", self.client.get("/articles?q=AI&source=" + str(source_id)).data.decode())
+        self.assertNotIn("AI &amp; tools", self.client.get("/articles?q=missing").data.decode())
+        response = self.client.post("/sources", data={"csrf_token": self.csrf, "name": "Another", "url": "https://example.org/rss"})
+        self.assertEqual(response.location, "/sources")
+
     def test_github_repositories_are_normalized(self):
         articles = github.parse_repositories({"items": [
             {"full_name": "owner/project", "html_url": "https://github.com/owner/project", "description": "Example", "stargazers_count": 120, "created_at": "2026-10-01T00:00:00Z"},

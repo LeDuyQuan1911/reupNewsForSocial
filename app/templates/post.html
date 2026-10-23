@@ -1,19 +1,11 @@
-<!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Biên tập bài · reupNewsForSocial</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <header class="topbar"><div class="brand"><span class="brand-mark">R</span><span>reupNewsForSocial</span></div><a class="back-link" href="{{ url_for('dashboard') }}">← Bảng tin</a></header>
-  <main class="shell editor-shell">
-    <a class="back-link" href="{{ url_for('dashboard') }}">← Quay lại bảng tin</a>
+{% extends 'base.html' %}
+{% block title %}Biên tập bài · reupNewsForSocial{% endblock %}
+{% block shell_class %}editor-shell{% endblock %}
+{% block content %}
+    <a class="back-link" href="{{ url_for('posts_page') }}">← Danh sách bài đăng</a>
     <span class="eyebrow editor-label">BIÊN TẬP BÀI ĐĂNG</span>
     <h1>{{ post.article_title }}</h1>
     <p class="editor-source"><a href="{{ post.article_url }}" target="_blank" rel="noopener noreferrer">Xem bài gốc ↗</a></p>
-    {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}
     <div class="editor-grid">
       <section class="panel editor-panel">
         <div class="image-panel">
@@ -82,6 +74,4 @@
         </section>
       </aside>
     </div>
-  </main>
-</body>
-</html>
+{% endblock %}

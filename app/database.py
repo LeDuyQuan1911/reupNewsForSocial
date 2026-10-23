@@ -94,14 +94,46 @@ def list_sources(path: Path) -> list[sqlite3.Row]:
         return db.execute("SELECT id, name, url, kind FROM sources ORDER BY name").fetchall()
 
 
-def list_articles(path: Path, limit: int = 100) -> list[sqlite3.Row]:
+def article_filter(source_id: int | None, search: str) -> tuple[str, list]:
+    filters = []
+    parameters = []
+    if source_id is not None:
+        filters.append("articles.source_id = ?")
+        parameters.append(source_id)
+    if search:
+        filters.append("(articles.title LIKE ? OR articles.summary LIKE ?)")
+        pattern = f"%{search}%"
+        parameters.extend((pattern, pattern))
+    return (f"WHERE {' AND '.join(filters)}" if filters else ""), parameters
+
+
+def list_articles(path: Path, limit: int = 100, source_id: int | None = None,
+                  search: str = "", offset: int = 0) -> list[sqlite3.Row]:
     with connect(path) as db:
+        where, parameters = article_filter(source_id, search)
         return db.execute(
-            """SELECT articles.*, sources.name AS source_name
+            f"""SELECT articles.*, sources.name AS source_name
                FROM articles JOIN sources ON sources.id = articles.source_id
-               ORDER BY articles.discovered_at DESC, articles.id DESC LIMIT ?""",
-            (limit,),
+               {where} ORDER BY articles.discovered_at DESC, articles.id DESC LIMIT ? OFFSET ?""",
+            (*parameters, limit, offset),
         ).fetchall()
+
+
+def count_articles(path: Path, source_id: int | None = None, search: str = "") -> int:
+    with connect(path) as db:
+        where, parameters = article_filter(source_id, search)
+        return db.execute(f"SELECT COUNT(*) FROM articles {where}", parameters).fetchone()[0]
+
+
+def overview_counts(path: Path) -> dict[str, int]:
+    with connect(path) as db:
+        counts = {
+            "sources": db.execute("SELECT COUNT(*) FROM sources").fetchone()[0],
+            "articles": db.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
+        }
+        for row in db.execute("SELECT status, COUNT(*) AS total FROM posts GROUP BY status"):
+            counts[row["status"]] = row["total"]
+        return counts
 
 
 def save_articles(path: Path, source_id: int, articles: list[dict[str, str]]) -> int:

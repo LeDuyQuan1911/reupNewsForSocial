@@ -33,7 +33,7 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `livrables/README.md` | Quy ước lưu sản phẩm đầu ra |
 | `.gitignore` | Loại trừ secrets và file sinh ra cục bộ |
 | `run.py` | Chạy dashboard Flask trên `127.0.0.1:5000` |
-| `app/web.py` | Route dashboard, thêm nguồn và tìm bài |
+| `app/web.py` | Route tổng quan, bài báo, bài đăng, nguồn, tài khoản và thao tác xuất bản |
 | `app/feeds.py` | Đọc và chuẩn hóa RSS/Atom |
 | `app/anthropic.py` | Đọc sitemap chính thức của Anthropic và metadata bài viết |
 | `app/github.py` | Tìm repo mới nổi qua GitHub Search API |
@@ -42,7 +42,10 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `app/media.py` | Tìm ảnh bài báo, chụp repo, tạo ảnh dự phòng và lưu JPEG cục bộ |
 | `app/queue.py` | Xử lý bài đến lịch, trạng thái đăng và lỗi |
 | `app/database.py` | Schema SQLite, nguồn tin và bài báo |
-| `app/templates/`, `app/static/style.css` | Giao diện dashboard và biên tập |
+| `app/templates/base.html`, `app/static/style.css` | Điều hướng chung và kiểu giao diện |
+| `app/templates/dashboard.html`, `articles.html`, `article.html` | Tổng quan, danh sách và chi tiết bài báo |
+| `app/templates/posts.html`, `post.html` | Danh sách bài đăng và trang biên tập |
+| `app/templates/sources.html`, `account.html` | Quản lý nguồn tin và trạng thái kết nối |
 | `.env.example` | Tên biến môi trường cho LLM và Facebook Page |
 | `tests/test_app.py` | Kiểm tra parser, chống trùng và route cơ bản |
 | `data/reup.sqlite3` | Dữ liệu cục bộ, được Git bỏ qua |

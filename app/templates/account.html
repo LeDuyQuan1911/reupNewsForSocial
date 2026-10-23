@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Tài khoản · reupNewsForSocial{% endblock %}
+{% block content %}
+<section class="page-heading"><div><span class="eyebrow">CÀI ĐẶT</span><h1>Tài khoản & kết nối</h1><p>Trạng thái cấu hình trên máy này. Thông tin bí mật không hiển thị trong dashboard.</p></div></section>
+<div class="account-grid">
+  <section class="panel connection-card"><div class="section-heading"><h2>Facebook Page</h2><span class="connection-state {{ 'ready' if connections.page else '' }}">{{ 'Đã cấu hình' if connections.page else 'Chưa cấu hình' }}</span></div><p>Đăng ngay và lên lịch qua Page API sau khi nội dung và ảnh được duyệt.</p><small>Cần Page ID và Page access token trong biến môi trường.</small></section>
+  <section class="panel connection-card"><div class="section-heading"><h2>LLM viết bài</h2><span class="connection-state {{ 'ready' if connections.llm else '' }}">{{ 'Đã cấu hình' if connections.llm else 'Chưa cấu hình' }}</span></div><p>Viết lại bản nháp từ tiêu đề, tóm tắt và liên kết nguồn.</p><small>Cần cấu hình model qua 9Router hoặc endpoint tương thích.</small></section>
+  <section class="panel connection-card"><div class="section-heading"><h2>LLM duyệt ảnh</h2><span class="connection-state {{ 'ready' if connections.vision else '' }}">{{ 'Đã cấu hình' if connections.vision else 'Chưa cấu hình riêng' }}</span></div><p>Duyệt nội dung và ảnh trước khi gửi lên Facebook.</p><small>Nếu chưa đặt model riêng, hệ thống thử model viết bài; model đó phải hỗ trợ ảnh.</small></section>
+  <section class="panel connection-card"><div class="section-heading"><h2>Trang cá nhân & nhóm</h2><span class="connection-state">Chưa tích hợp</span></div><p>Phần kết nối và tự động đăng các đích này sẽ được làm sau khi chọn phương thức đăng phù hợp.</p></section>
+</div>
+<div class="next-step account-note"><span class="eyebrow">THIẾT LẬP</span><h3>Cấu hình trên máy cá nhân</h3><p>Xem <code>.env.example</code> trong thư mục dự án để biết tên các biến môi trường, rồi khởi động lại ứng dụng. Trang này chỉ cho biết biến đã được đặt; chưa xác nhận token hay model hoạt động.</p></div>
+{% endblock %}
