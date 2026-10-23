@@ -31,9 +31,19 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         if not allowed:
             database.finish_post(path, post_id, "blocked", error=reason or "Nội dung cần xem lại")
             return
-        platform_post_id = facebook.publish_page(post["body"])
     except Exception as exc:
         database.finish_post(path, post_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
+        return
+    try:
+        platform_post_id = facebook.publish_page(post["body"])
+    except facebook.PageConfigurationError as exc:
+        database.finish_post(path, post_id, "failed", error=str(exc)[:500])
+        return
+    except Exception as exc:
+        database.finish_post(
+            path, post_id, "uncertain",
+            error=(f"Chưa xác nhận Facebook đã đăng hay chưa: {type(exc).__name__}: {exc}")[:500],
+        )
         return
     database.finish_post(path, post_id, "published", platform_post_id=platform_post_id, published_at=now_utc())
 

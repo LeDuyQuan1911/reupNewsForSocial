@@ -16,18 +16,16 @@
 - [x] Thêm nguồn Anthropic từ sitemap chính thức và repo GitHub nổi bật qua Search API.
 - [x] Tạo bản nháp, lên lịch/đăng ngay và adapter Facebook Page có bước kiểm duyệt LLM trước khi gửi.
 - [x] Chặn đăng tin có tiêu đề tương tự bài đã đăng trong 14 ngày gần đây.
+- [x] Review độc lập bản đầu và xử lý lỗi retry có thể đăng trùng sau timeout.
 
 ## Tiếp theo
 
-- [ ] Chốt các điểm còn mở trong `SPEC.md`: giọng văn, ngôn ngữ, quy tắc kiểm duyệt, cách đăng vào trang cá nhân/nhóm.
+- [ ] Chốt các điểm còn mở trong `SPEC.md`: mẫu giọng văn bổ sung, quy tắc kiểm duyệt, cách đăng vào trang cá nhân/nhóm.
 - [ ] Xếp hạng bài và bổ sung nhận diện trùng nội dung khác tiêu đề.
 - [ ] Kiểm tra viết bài và kiểm duyệt với 9Router/model thật; chọn giọng văn và ngôn ngữ đầu ra.
 - [ ] Kiểm tra đăng thật lên Facebook Page bằng quyền và token của chủ dự án.
 - [ ] Kiểm chứng giải pháp đăng tự động lên trang cá nhân và nhóm bằng phiên trình duyệt của chủ dự án.
 - [ ] Build runtime vendored và bật Git hook cục bộ khi quyền cho phép; kiểm tra một commit thực tế.
 - [ ] Chọn plugin cần bật cho dự án thực tế.
-- [ ] Chốt phạm vi bản đầu, stack và tiêu chí hoàn thành.
-- [ ] Thiết kế cấu trúc source theo nhu cầu thực tế; cập nhật `MAP.md`.
-- [ ] Xây một lát chức năng nhỏ, chạy kiểm tra và ghi kết quả.
 
 Chỉ thêm MCP, skill, agent chuyên biệt hoặc script tự động khi có nhu cầu rõ ràng.

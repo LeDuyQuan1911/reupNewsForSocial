@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -194,7 +195,7 @@ def claim_due_posts(path: Path, now_iso: str) -> list[int]:
 
 
 def finish_post(path: Path, post_id: int, status: str, error: str | None = None, platform_post_id: str | None = None, published_at: str | None = None) -> None:
-    if status not in {"published", "blocked", "failed"}:
+    if status not in {"published", "blocked", "failed", "uncertain"}:
         raise ValueError("Trạng thái không hợp lệ")
     with connect(path) as db:
         db.execute(
@@ -202,3 +203,19 @@ def finish_post(path: Path, post_id: int, status: str, error: str | None = None,
                WHERE id = ? AND status = 'publishing'""",
             (status, error, platform_post_id, published_at, post_id),
         )
+
+
+def resolve_uncertain_post(path: Path, post_id: int, was_published: bool) -> None:
+    with connect(path) as db:
+        if was_published:
+            changed = db.execute(
+                "UPDATE posts SET status = 'published', published_at = ?, last_error = NULL WHERE id = ? AND status = 'uncertain'",
+                (datetime.now(timezone.utc).isoformat(), post_id),
+            ).rowcount
+        else:
+            changed = db.execute(
+                "UPDATE posts SET status = 'draft', scheduled_at = NULL, last_error = NULL WHERE id = ? AND status = 'uncertain'",
+                (post_id,),
+            ).rowcount
+        if not changed:
+            raise ValueError("Bài không ở trạng thái cần đối chiếu")

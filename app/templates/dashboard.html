@@ -64,7 +64,7 @@
           {% if posts %}
             <ul class="post-list">
               {% for post in posts %}
-              <li><a href="{{ url_for('edit_post', post_id=post.id) }}"><strong>{{ post.article_title }}</strong><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng'}.get(post.status,post.status) }}</span></a></li>
+              <li><a href="{{ url_for('edit_post', post_id=post.id) }}"><strong>{{ post.article_title }}</strong><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></a></li>
               {% endfor %}
             </ul>
           {% else %}<p class="muted queue-empty">Tạo bản nháp từ một bài trong bảng tin để bắt đầu.</p>{% endif %}

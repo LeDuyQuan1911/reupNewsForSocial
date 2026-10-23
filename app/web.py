@@ -164,4 +164,19 @@ def create_app(database_path: Path | None = None) -> Flask:
                 flash(f"Chưa đăng: {post['last_error'] or post['status']}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
 
+    @app.post("/posts/<int:post_id>/resolve")
+    def resolve_post(post_id):
+        if request.form.get("checked_page") != "yes":
+            flash("Hãy kiểm tra Page trước khi xác nhận kết quả.", "error")
+            return redirect(url_for("edit_post", post_id=post_id))
+        outcome = request.form.get("outcome")
+        if outcome not in {"published", "not_published"}:
+            abort(400)
+        try:
+            database.resolve_uncertain_post(app.config["DATABASE_PATH"], post_id, outcome == "published")
+            flash("Đã cập nhật trạng thái sau khi đối chiếu trên Page.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("edit_post", post_id=post_id))
+
     return app

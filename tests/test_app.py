@@ -18,7 +18,7 @@ RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
 
 class DashboardTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(dir="data")
+        self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.db_path = Path(self.directory.name) / "test.sqlite3"
         self.client = create_app(self.db_path).test_client()
         page = self.client.get("/").data.decode()
@@ -108,6 +108,27 @@ class DashboardTests(unittest.TestCase):
             reviewer.assert_not_called()
             publisher.assert_not_called()
         self.assertEqual(database.get_post(self.db_path, second)["status"], "blocked")
+
+    def test_uncertain_facebook_response_requires_manual_reconciliation(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        post_id = database.list_posts(self.db_path)[0]["id"]
+        self.assertTrue(database.claim_post(self.db_path, post_id))
+        with patch("app.queue.llm.check_content", return_value=(True, "Đạt")), patch(
+            "app.queue.facebook.publish_page", side_effect=TimeoutError("response lost")
+        ):
+            queue.process_claimed_post(self.db_path, post_id)
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "uncertain")
+        self.assertFalse(database.claim_post(self.db_path, post_id))
+        response = self.client.post(
+            f"/posts/{post_id}/resolve",
+            data={"csrf_token": self.csrf, "checked_page": "yes", "outcome": "published"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(database.get_post(self.db_path, post_id)["status"], "published")
 
 
 if __name__ == "__main__":
