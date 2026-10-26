@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
+import logging
 import re
 
 from . import database, facebook, llm, media
@@ -27,12 +28,15 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         if any(similar_title(post["article_title"], title) for title in prior_titles):
             database.finish_post(path, post_id, "blocked", error="Tin tương tự đã được đăng trong 14 ngày gần đây")
             return
-        images = [image_path.read_bytes() for image_path in media.post_image_paths(path, post_id)]
+        images = [image_path.read_bytes() for image_path in media.publishable_post_image_paths(path, post_id)]
         for image in images:
             allowed, reason = llm.check_post(post["body"], image)
             if not allowed:
                 database.finish_post(path, post_id, "blocked", error=reason or "Nội dung hoặc ảnh cần xem lại")
                 return
+    except media.MissingImageError as exc:
+        database.finish_post(path, post_id, "blocked", error=str(exc))
+        return
     except Exception as exc:
         database.finish_post(path, post_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
         return
@@ -48,10 +52,27 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         )
         return
     database.finish_post(path, post_id, "published", platform_post_id=platform_post_id, published_at=now_utc())
+    process_video_comment(path, post_id)
+
+
+def process_video_comment(path: Path, post_id: int) -> None:
+    claimed = database.claim_video_comment(path, post_id)
+    if claimed is None:
+        return
+    try:
+        comment_id = facebook.comment_video(claimed["platform_post_id"], claimed["video_url"])
+    except Exception as exc:
+        # A timeout may mean Facebook accepted the comment. Never retry blindly.
+        database.finish_video_comment(path, post_id, error=f"{type(exc).__name__}: cần kiểm tra bình luận trên Page")
+        logging.warning("Video comment needs reconciliation for post %s: %s", post_id, type(exc).__name__)
+    else:
+        database.finish_video_comment(path, post_id, comment_id=comment_id)
 
 
 def process_due_posts(path: Path) -> int:
     ids = database.claim_due_posts(path, now_utc())
     for post_id in ids:
         process_claimed_post(path, post_id)
+    for post_id in database.pending_video_comment_ids(path):
+        process_video_comment(path, post_id)
     return len(ids)

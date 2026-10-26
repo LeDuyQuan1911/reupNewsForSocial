@@ -1,9 +1,13 @@
 """Prepare a local JPEG for each post from its article or GitHub repository."""
 
+import base64
 from html.parser import HTMLParser
 from http.client import HTTPSConnection
 from io import BytesIO
 import ipaddress
+import json
+import logging
+import os
 from pathlib import Path
 import re
 import socket
@@ -79,7 +83,7 @@ class ImageMetadataParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.metadata = {}
-        self.first_image = ""
+        self.images = []
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
@@ -87,18 +91,73 @@ class ImageMetadataParser(HTMLParser):
             key = values.get("property") or values.get("name")
             if key in {"og:image", "twitter:image"} and values.get("content"):
                 self.metadata[key] = values["content"]
-        elif tag == "img" and not self.first_image:
-            self.first_image = values.get("src", "")
+        elif tag == "img":
+            candidate = values.get("src") or values.get("data-src")
+            if candidate:
+                self.images.append((candidate, values.get("alt", "")))
 
 
-def find_article_image(article_url: str) -> str:
+def find_article_images(article_url: str, title: str = "") -> list[str]:
     data, final_url = fetch_public_bytes(article_url, MAX_PAGE_BYTES)
     parser = ImageMetadataParser()
     parser.feed(data.decode("utf-8", errors="replace"))
-    candidate = parser.metadata.get("og:image") or parser.metadata.get("twitter:image") or parser.first_image
-    if not candidate:
+    keywords = set(re.findall(r"\w{4,}", title.casefold()))
+    images = sorted(parser.images, key=lambda item: len(keywords & set(re.findall(r"\w{4,}", item[1].casefold()))), reverse=True)
+    candidates = [parser.metadata.get("og:image"), parser.metadata.get("twitter:image")]
+    candidates.extend(candidate for candidate, _ in images)
+    urls = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        url = urljoin(final_url, candidate)
+        if url not in urls and urlparse(url).scheme == "https":
+            urls.append(url)
+        if len(urls) >= 12:
+            break
+    if not urls:
         raise MissingImageError("Bài gốc không có ảnh có thể lấy được")
-    return urljoin(final_url, candidate)
+    return urls
+
+
+def find_article_image(article_url: str) -> str:
+    return find_article_images(article_url)[0]
+
+
+def repository_image_urls(repo_url: str) -> list[str]:
+    match = re.fullmatch(r"https://github\.com/([^/?#]+)/([^/?#]+)/?", repo_url)
+    if not match:
+        raise ValueError("URL repo GitHub không hợp lệ")
+    owner, repo = match.groups()
+    raw, _ = fetch_public_bytes(f"https://api.github.com/repos/{owner}/{repo}/readme", MAX_PAGE_BYTES)
+    document = json.loads(raw)
+    readme_url = document.get("download_url", "")
+    if urlparse(readme_url).hostname != "raw.githubusercontent.com":
+        raise ValueError("URL README GitHub không hợp lệ")
+    markdown = base64.b64decode(document["content"]).decode("utf-8", errors="replace")
+    references = re.findall(r"!\[[^\]]*\]\(<([^>]+)>\)|!\[[^\]]*\]\(([^\s)]+)", markdown)
+    candidates = [left or right for left, right in references]
+    candidates.extend(re.findall(r"<img\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)", markdown, flags=re.IGNORECASE))
+    urls = []
+    for candidate in candidates:
+        url = urljoin(readme_url, candidate)
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or re.search(r"(?:badge|shield|avatar|logo)", parsed.path, re.IGNORECASE):
+            continue
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= 12:
+            break
+    return urls
+
+
+def first_usable_image(urls: list[str]) -> tuple[bytes, str]:
+    for url in urls:
+        try:
+            raw, final_url = fetch_public_bytes(url, MAX_IMAGE_BYTES)
+            return normalized_jpeg(raw), final_url
+        except Exception:
+            continue
+    raise MissingImageError("Không tải được ảnh đủ lớn từ nguồn")
 
 
 def screenshot_repository(url: str) -> bytes:
@@ -184,6 +243,15 @@ def post_image_paths(database_path: Path, post_id: int) -> list[Path]:
     return [post_image_path(database_path, image, post_id) for image in images]
 
 
+def publishable_post_image_paths(database_path: Path, post_id: int) -> list[Path]:
+    """Require a real illustration or source image before sending a post to a Page."""
+    images = database.list_post_images(database_path, post_id)
+    paths = post_image_paths(database_path, post_id)
+    if all(image["kind"] == "title_card" for image in images):
+        raise MissingImageError("Ảnh thẻ tiêu đề chỉ là ảnh tạm; hãy thêm ảnh bài gốc hoặc ảnh minh họa trước khi đăng")
+    return paths
+
+
 def save_post_image(database_path: Path, post_id: int, image: bytes, source_url: str,
                     kind: str, append: bool = True) -> Path:
     media_dir = database_path.parent / "media"
@@ -208,6 +276,17 @@ def save_uploaded_post_image(database_path: Path, post_id: int, raw: bytes) -> P
     return save_post_image(database_path, post_id, normalized_jpeg(raw), "", "upload")
 
 
+def generated_or_placeholder(post) -> tuple[bytes, str]:
+    if os.environ.get("REUP_LLM_IMAGE_MODEL", "").strip():
+        try:
+            from . import llm
+            image = llm.generate_image(post["article_title"], post["article_summary"] or "")
+            return normalized_jpeg(image), "router_generated"
+        except Exception as exc:
+            logging.warning("9Router image generation unavailable for post %s: %s", post["id"], type(exc).__name__)
+    return normalized_jpeg(title_card(post["article_title"], post["source_name"], post["article_url"])), "title_card"
+
+
 def prepare_post_image(database_path: Path, post_id: int, append: bool = False) -> Path:
     post = database.get_post(database_path, post_id)
     if post is None:
@@ -216,22 +295,28 @@ def prepare_post_image(database_path: Path, post_id: int, append: bool = False) 
         raise ValueError("Không thể thay ảnh của bài đã lên lịch hoặc đã đăng")
     if post["source_kind"] == "github":
         try:
-            image = normalized_jpeg(screenshot_repository(post["article_url"]))
-            kind = "screenshot"
+            image, source_url = first_usable_image(repository_image_urls(post["article_url"]))
+            kind = "repo_asset"
         except Exception:
-            image = normalized_jpeg(title_card(post["article_title"], post["source_name"], post["article_url"]))
-            kind = "title_card"
-        source_url = post["article_url"]
+            source_url = post["article_url"]
+            try:
+                image = normalized_jpeg(screenshot_repository(source_url))
+                kind = "screenshot"
+            except Exception:
+                image, kind = generated_or_placeholder(post)
     else:
         source_url = post["article_url"]
         try:
-            candidate = post["article_image_url"] or find_article_image(post["article_url"])
-            source_url = urljoin(post["article_url"], candidate)
-            raw, source_url = fetch_public_bytes(source_url, MAX_IMAGE_BYTES)
-            image = normalized_jpeg(raw)
+            image = None
+            if post["article_image_url"]:
+                try:
+                    image, source_url = first_usable_image([urljoin(source_url, post["article_image_url"])])
+                except MissingImageError:
+                    pass
+            if image is None:
+                image, source_url = first_usable_image(find_article_images(post["article_url"], post["article_title"]))
             kind = "source"
         except Exception:
             source_url = post["article_url"]
-            image = normalized_jpeg(title_card(post["article_title"], post["source_name"], source_url))
-            kind = "title_card"
+            image, kind = generated_or_placeholder(post)
     return save_post_image(database_path, post_id, image, source_url, kind, append=append)

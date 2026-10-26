@@ -18,6 +18,9 @@ class AutomationTests(unittest.TestCase):
         database.add_source(self.path, "Test RSS", "https://example.com/rss")
         self.source_id = database.list_sources(self.path)[0]["id"]
         self.now = datetime.now(timezone.utc)
+        ranking = patch("app.research.llm.chat", return_value='{"picks":[]}')
+        ranking.start()
+        self.addCleanup(ranking.stop)
 
     def tearDown(self):
         self.directory.cleanup()
@@ -60,8 +63,8 @@ class AutomationTests(unittest.TestCase):
             result = automation.run_cycle(self.path, self.now)
             again = automation.run_cycle(self.path, self.now)
 
-        self.assertEqual(result, {"found": 7, "prepared": 6, "scheduled": 0})
-        self.assertEqual(again, {"found": 0, "prepared": 0, "scheduled": 0})
+        self.assertEqual(result, {"found": 7, "reviewed": 7, "prepared": 6, "scheduled": 0})
+        self.assertEqual(again, {"found": 0, "reviewed": 0, "prepared": 0, "scheduled": 0})
         scanner.assert_called_once()
         self.assertEqual(database.count_posts(self.path), 6)
         self.assertIsNone(database.get_post_for_article(self.path, 1))
@@ -91,6 +94,31 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result["scheduled"], 0)
         self.assertEqual(database.list_posts(self.path)[0]["status"], "blocked")
         self.assertEqual(database.automation_status(self.path)["counts"].get("blocked"), 1)
+
+    def test_title_only_image_stays_as_draft_and_is_not_scheduled(self):
+        def scan(path):
+            return database.save_articles(path, self.source_id, self.articles("title-only", 1)), []
+
+        def prepare_title_card(path, post_id):
+            image = self.prepare_image(path, post_id)
+            database.attach_image(path, post_id, image.name, "", "title_card")
+            return image
+
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_LLM_MODEL": "test-text",
+                    "REUP_LLM_VISION_MODEL": "test-vision", "REUP_FACEBOOK_PAGE_ID": "page",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "test-only", "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", side_effect=scan), \
+             patch("app.automation.media.prepare_post_image", side_effect=prepare_title_card), \
+             patch("app.automation.llm.write_draft", return_value="Draft with source"), \
+             patch("app.automation.llm.check_post", return_value=(True, "OK")) as check_post:
+            result = automation.run_cycle(self.path, self.now)
+
+        post = database.list_posts(self.path)[0]
+        self.assertEqual(result["scheduled"], 0)
+        self.assertEqual(post["status"], "blocked")
+        self.assertEqual(database.automation_status(self.path)["counts"].get("blocked"), 1)
+        check_post.assert_not_called()
 
     def test_transient_generation_error_retries_existing_draft(self):
         def scan(path):
@@ -128,6 +156,19 @@ class AutomationTests(unittest.TestCase):
 
         self.assertEqual(result["prepared"], 6)
         self.assertEqual(database.automation_status(self.path)["counts"].get("blocked"), 1)
+
+    def test_paused_source_does_not_prepare_saved_articles(self):
+        database.save_articles(self.path, self.source_id, self.articles("paused", 1))
+        database.claim_automation_scan(self.path, self.now.isoformat(), automation.SCAN_INTERVAL_SECONDS)
+        database.set_source_active(self.path, self.source_id, False)
+        settings = {"REUP_LLM_MODEL": "test-text", "REUP_LLM_VISION_MODEL": "test-vision"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.media.prepare_post_image", side_effect=self.prepare_image), \
+             patch("app.automation.llm.write_draft", return_value="Draft with source"), \
+             patch("app.automation.llm.check_post", return_value=(True, "OK")):
+            self.assertEqual(automation.prepare_articles(self.path, self.now), 0)
+            database.set_source_active(self.path, self.source_id, True)
+            self.assertEqual(automation.prepare_articles(self.path, self.now), 1)
 
 
 if __name__ == "__main__":

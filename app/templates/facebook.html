@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}Facebook · reupNewsForSocial{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="{{ url_for('static', filename='facebook.css') }}">{% endblock %}
+{% block content %}
+<section class="panel facebook-page-setup" aria-labelledby="facebook-page-title">
+  <div class="section-heading"><div><h1 id="facebook-page-title">Đăng lên Facebook Page</h1><p>Đây là kênh được hệ thống hỗ trợ tự đăng theo lịch.</p></div><span class="connection-state {{ 'ready' if page_ready else '' }}">{{ 'Đã nhập thông số' if page_ready else 'Chưa có token' }}</span></div>
+  <div class="facebook-page-content">
+    {% if page_ready %}
+    <p>Page ID, token và phiên bản API đã được đặt trên máy. Kiểm tra token bằng lệnh bên dưới, xem các bài đang chờ rồi thử một bài trước khi để lịch tự chạy.</p>
+    {% else %}
+    <p>Bạn đã có Page. Ứng dụng cần Page access token hợp lệ của đúng Page; không cần tạo Meta App mới nếu bạn đã có token được cấp từ một App/tích hợp phù hợp.</p>
+    {% endif %}
+    <ol>
+      <li>Nếu đã có Page token phù hợp, chuyển tới bước 4. Nếu chưa, dùng Meta App đang có hoặc <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer">tạo App mới</a> để lấy token.</li>
+      <li>Trong <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>, chọn App, cấp quyền quản lý/đăng Page và tạo User access token.</li>
+      <li>Gọi <code>/me/accounts?fields=id,name,access_token,tasks</code>, chọn đúng Page rồi lấy <strong>Page ID</strong> và <strong>Page access token</strong>. Giữ token trên máy của bạn.</li>
+      <li>Mở PowerShell tại repo và chạy <code>.\scripts\configure-facebook-page.ps1{{ ' -Check' if page_ready else '' }}</code>. Script kiểm tra tên/ID Page trước khi lưu cấu hình.</li>
+    </ol>
+    <p class="facebook-page-footnote">Kiểm tra tên Page là bước chỉ đọc; quyền đăng cần được xác nhận bằng một bài thử. Sau khi cấu hình, hãy xem <a href="{{ url_for('posts_page', view='action') }}">bài đang chờ</a> trước khi khởi động lại dashboard.</p>
+  </div>
+</section>
+<details class="facebook-deferred">
+  <summary>Nhóm Facebook (để sau)<span>{{ groups|length }} nhóm đã lưu</span></summary>
+<div class="facebook-layout">
+  <section class="panel facebook-groups" aria-labelledby="facebook-title">
+    <div class="section-heading facebook-heading">
+      <div><h2 id="facebook-title">Nhóm dự kiến đăng</h2><p>{{ selected_count }} nhóm đã chọn trong {{ groups|length }} nhóm đã lưu.</p></div>
+      <span class="count">{{ groups|length }} nhóm</span>
+    </div>
+    <div class="facebook-caution" role="note">
+      <strong>Đăng nhóm chưa hoạt động</strong>
+      <p>Danh sách này giúp chọn nhóm đích cho bước tích hợp tiếp theo. Hệ thống hiện chỉ có thể tự đăng lên Facebook Page khi đã kết nối; thêm nhóm ở đây sẽ không gửi bài vào nhóm.</p>
+    </div>
+    {% if groups %}
+    <div class="facebook-group-list">
+      {% for group in groups %}
+      <article class="facebook-group {{ 'is-paused' if not group.active else '' }}">
+        <div class="facebook-group-main">
+          <div class="facebook-group-title"><h2>{{ group.name }}</h2><span class="facebook-state {{ 'selected' if group.active else 'paused' }}">{{ 'Đã chọn' if group.active else 'Tạm dừng' }}</span></div>
+          <a href="{{ group.url }}" target="_blank" rel="noopener noreferrer">{{ group.url }}</a>
+        </div>
+        <div class="facebook-group-actions">
+          <form action="{{ url_for('toggle_facebook_group', group_id=group.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="active" value="{{ '0' if group.active else '1' }}">
+            <button class="secondary" type="submit" aria-label="{{ 'Tạm dừng' if group.active else 'Chọn lại' }} nhóm {{ group.name }}">{{ 'Tạm dừng' if group.active else 'Chọn lại' }}</button>
+          </form>
+          <form action="{{ url_for('remove_facebook_group', group_id=group.id) }}" method="post" onsubmit="return confirm('Xóa nhóm này khỏi danh sách đích?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="facebook-delete" type="submit" aria-label="Xóa nhóm {{ group.name }}">Xóa</button>
+          </form>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state facebook-empty"><h2>Chưa có nhóm đích</h2><p>Dán URL một nhóm Facebook vào mục Thêm nhóm để lập danh sách.</p></div>
+    {% endif %}
+  </section>
+
+  <aside class="facebook-side">
+    <section class="panel facebook-add" aria-labelledby="facebook-add-title">
+      <div class="section-heading"><h2 id="facebook-add-title">Thêm nhóm</h2></div>
+      <form action="{{ url_for('add_facebook_group') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="facebook-group-name">Tên dễ nhận biết</label>
+        <input id="facebook-group-name" name="name" maxlength="100" placeholder="Ví dụ: Cộng đồng AI Việt Nam" autocomplete="off" required>
+        <label for="facebook-group-url">URL nhóm Facebook</label>
+        <input id="facebook-group-url" name="url" type="url" maxlength="500" placeholder="https://www.facebook.com/groups/..." autocomplete="off" required>
+        <p>Chỉ lưu liên kết nhóm. Bạn vẫn cần có quyền đăng trong nhóm đó.</p>
+        <button class="primary" type="submit">Thêm vào danh sách</button>
+      </form>
+    </section>
+  </aside>
+</div>
+</details>
+{% endblock %}

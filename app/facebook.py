@@ -80,3 +80,25 @@ def publish_page(body: str, image: bytes | list[bytes]) -> str:
     if not isinstance(post_id, str) or not post_id:
         raise ValueError("Facebook không trả ID bài đăng")
     return post_id
+
+
+def comment_video(post_id: str, video_url: str) -> str:
+    """Comment on a confirmed Page post; callers persist the result separately."""
+    token = os.environ.get("REUP_FACEBOOK_PAGE_TOKEN", "").strip()
+    version = os.environ.get("REUP_META_GRAPH_VERSION", "").strip()
+    if not token or not re.fullmatch(r"v\d+\.\d+", version):
+        raise PageConfigurationError("Cần Page token và phiên bản Graph API để bình luận")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", post_id) or not video_url.startswith("https://"):
+        raise ValueError("ID bài đăng hoặc URL video không hợp lệ")
+    request = Request(
+        f"https://graph.facebook.com/{version}/{post_id}/comments",
+        data=urlencode({"message": video_url}).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        result = json.load(response)
+    comment_id = result.get("id")
+    if not isinstance(comment_id, str) or not comment_id:
+        raise ValueError("Facebook không trả ID bình luận")
+    return comment_id

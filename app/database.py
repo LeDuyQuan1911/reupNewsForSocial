@@ -1,7 +1,8 @@
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 
 SCHEMA = """
@@ -10,6 +11,16 @@ CREATE TABLE IF NOT EXISTS sources (
     name TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL DEFAULT 'rss',
+    active INTEGER NOT NULL DEFAULT 1,
+    last_checked_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS facebook_groups (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS articles (
@@ -23,6 +34,14 @@ CREATE TABLE IF NOT EXISTS articles (
     discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_articles_discovered ON articles(discovered_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS research_reviews (
+    article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+    score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+    reason TEXT NOT NULL,
+    method TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_research_score ON research_reviews(score DESC, reviewed_at DESC);
 CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY,
     article_id INTEGER NOT NULL UNIQUE REFERENCES articles(id),
@@ -32,10 +51,15 @@ CREATE TABLE IF NOT EXISTS posts (
     published_at TEXT,
     platform_post_id TEXT,
     last_error TEXT,
+    video_url TEXT NOT NULL DEFAULT '',
+    video_comment_status TEXT NOT NULL DEFAULT '',
+    video_comment_id TEXT,
+    video_comment_error TEXT,
     image_file TEXT,
     image_source_url TEXT,
     image_kind TEXT,
     test_only INTEGER NOT NULL DEFAULT 0,
+    publishing_started_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_posts_schedule ON posts(status, scheduled_at);
@@ -70,6 +94,9 @@ STARTER_SOURCES = (
     ("Google AI", "https://blog.google/technology/ai/rss/", "rss"),
     ("Anthropic News", "https://www.anthropic.com/news", "anthropic"),
     ("GitHub nổi bật 30 ngày", "https://github.com/trending", "github"),
+    ("NVIDIA Technical Blog", "https://developer.nvidia.com/blog/feed/", "rss"),
+    ("AWS Machine Learning Blog", "https://aws.amazon.com/blogs/machine-learning/feed/", "rss"),
+    ("Microsoft Research", "https://www.microsoft.com/en-us/research/feed/", "rss"),
 )
 
 
@@ -93,6 +120,12 @@ def initialize(path: Path) -> None:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(sources)")}
         if "kind" not in columns:
             db.execute("ALTER TABLE sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'rss'")
+        if "active" not in columns:
+            db.execute("ALTER TABLE sources ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        if "last_checked_at" not in columns:
+            db.execute("ALTER TABLE sources ADD COLUMN last_checked_at TEXT")
+        if "last_error" not in columns:
+            db.execute("ALTER TABLE sources ADD COLUMN last_error TEXT")
         article_columns = {row["name"] for row in db.execute("PRAGMA table_info(articles)")}
         if "image_url" not in article_columns:
             db.execute("ALTER TABLE articles ADD COLUMN image_url TEXT")
@@ -105,6 +138,18 @@ def initialize(path: Path) -> None:
             db.execute("ALTER TABLE posts ADD COLUMN image_kind TEXT")
         if "test_only" not in post_columns:
             db.execute("ALTER TABLE posts ADD COLUMN test_only INTEGER NOT NULL DEFAULT 0")
+        if "publishing_started_at" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN publishing_started_at TEXT")
+            db.execute("UPDATE posts SET publishing_started_at = ? WHERE status = 'publishing'",
+                       (datetime.now(timezone.utc).isoformat(),))
+        for name, definition in (
+            ("video_url", "TEXT NOT NULL DEFAULT ''"),
+            ("video_comment_status", "TEXT NOT NULL DEFAULT ''"),
+            ("video_comment_id", "TEXT"),
+            ("video_comment_error", "TEXT"),
+        ):
+            if name not in post_columns:
+                db.execute(f"ALTER TABLE posts ADD COLUMN {name} {definition}")
         if not had_post_images:
             db.execute("""INSERT INTO post_images (post_id, image_file, source_url, kind, sort_order)
                           SELECT id, image_file, COALESCE(image_source_url, ''),
@@ -122,17 +167,60 @@ def add_source(path: Path, name: str, url: str) -> None:
         db.execute("INSERT INTO sources (name, url) VALUES (?, ?)", (name, url))
 
 
+def add_facebook_group(path: Path, name: str, url: str) -> None:
+    with connect(path) as db:
+        db.execute("INSERT INTO facebook_groups (name, url) VALUES (?, ?)", (name, url))
+
+
+def list_facebook_groups(path: Path) -> list[sqlite3.Row]:
+    with connect(path) as db:
+        return db.execute("SELECT id, name, url, active FROM facebook_groups ORDER BY active DESC, name COLLATE NOCASE").fetchall()
+
+
+def set_facebook_group_active(path: Path, group_id: int, active: bool) -> None:
+    with connect(path) as db:
+        if db.execute("UPDATE facebook_groups SET active = ? WHERE id = ?", (int(active), group_id)).rowcount != 1:
+            raise ValueError("Nhóm Facebook không tồn tại")
+
+
+def delete_facebook_group(path: Path, group_id: int) -> None:
+    with connect(path) as db:
+        if db.execute("DELETE FROM facebook_groups WHERE id = ?", (group_id,)).rowcount != 1:
+            raise ValueError("Nhóm Facebook không tồn tại")
+
+
 def add_starter_sources(path: Path) -> None:
     with connect(path) as db:
         db.executemany("INSERT OR IGNORE INTO sources (name, url, kind) VALUES (?, ?, ?)", STARTER_SOURCES)
 
 
-def list_sources(path: Path) -> list[sqlite3.Row]:
+def list_sources(path: Path, active_only: bool = False) -> list[sqlite3.Row]:
     with connect(path) as db:
-        return db.execute("SELECT id, name, url, kind FROM sources ORDER BY name").fetchall()
+        where = "WHERE active = 1" if active_only else ""
+        return db.execute(f"SELECT id, name, url, kind, active, last_checked_at, last_error FROM sources {where} ORDER BY active DESC, name").fetchall()
 
 
-def article_filter(source_id: int | None, search: str) -> tuple[str, list]:
+def set_source_active(path: Path, source_id: int, active: bool) -> None:
+    with connect(path) as db:
+        if db.execute("UPDATE sources SET active = ? WHERE id = ?", (int(active), source_id)).rowcount != 1:
+            raise ValueError("Nguồn tin không tồn tại")
+
+
+def source_is_active(path: Path, source_id: int) -> bool:
+    with connect(path) as db:
+        row = db.execute("SELECT active FROM sources WHERE id = ?", (source_id,)).fetchone()
+        return bool(row and row["active"])
+
+
+def record_source_scan(path: Path, source_id: int, error: str | None = None) -> None:
+    with connect(path) as db:
+        db.execute("UPDATE sources SET last_checked_at = ?, last_error = ? WHERE id = ?",
+                   (datetime.now(timezone.utc).isoformat(), error[:200] if error else None, source_id))
+
+
+def article_filter(source_id: int | None, search: str, view: str = "all") -> tuple[str, list]:
+    if view not in {"all", "unselected", "selected", "reviewed"}:
+        raise ValueError("Bộ lọc bài báo không hợp lệ")
     filters = []
     parameters = []
     if source_id is not None:
@@ -143,25 +231,80 @@ def article_filter(source_id: int | None, search: str) -> tuple[str, list]:
         escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         parameters.extend((pattern, pattern))
+    if view == "reviewed":
+        filters.append("research_reviews.article_id IS NOT NULL")
+    elif view != "all":
+        relation = "EXISTS" if view == "selected" else "NOT EXISTS"
+        filters.append(f"{relation} (SELECT 1 FROM posts WHERE posts.article_id = articles.id)")
     return (f"WHERE {' AND '.join(filters)}" if filters else ""), parameters
 
 
 def list_articles(path: Path, limit: int = 100, source_id: int | None = None,
-                  search: str = "", offset: int = 0) -> list[sqlite3.Row]:
+                  search: str = "", offset: int = 0, view: str = "all") -> list[sqlite3.Row]:
     with connect(path) as db:
-        where, parameters = article_filter(source_id, search)
+        where, parameters = article_filter(source_id, search, view)
+        order = ("research_reviews.score DESC, research_reviews.reviewed_at DESC, articles.id DESC"
+                 if view == "reviewed" else "articles.discovered_at DESC, articles.id DESC")
         return db.execute(
-            f"""SELECT articles.*, sources.name AS source_name
+            f"""SELECT articles.*, sources.name AS source_name,
+                      research_reviews.score AS research_score,
+                      research_reviews.reason AS research_reason,
+                      research_reviews.method AS research_method
                FROM articles JOIN sources ON sources.id = articles.source_id
-               {where} ORDER BY articles.discovered_at DESC, articles.id DESC LIMIT ? OFFSET ?""",
+               LEFT JOIN research_reviews ON research_reviews.article_id = articles.id
+               {where} ORDER BY {order} LIMIT ? OFFSET ?""",
             (*parameters, limit, offset),
         ).fetchall()
 
 
-def count_articles(path: Path, source_id: int | None = None, search: str = "") -> int:
+def count_articles(path: Path, source_id: int | None = None, search: str = "", view: str = "all") -> int:
     with connect(path) as db:
-        where, parameters = article_filter(source_id, search)
-        return db.execute(f"SELECT COUNT(*) FROM articles {where}", parameters).fetchone()[0]
+        where, parameters = article_filter(source_id, search, view)
+        return db.execute(f"SELECT COUNT(*) FROM articles LEFT JOIN research_reviews ON research_reviews.article_id = articles.id {where}", parameters).fetchone()[0]
+
+
+def list_research_candidates(path: Path, cutoff_iso: str, limit: int = 30) -> list[sqlite3.Row]:
+    with connect(path) as db:
+        state = db.execute("SELECT baseline_article_id FROM automation_state WHERE id = 1").fetchone()
+        if state is None:
+            return []
+        return db.execute(
+            """SELECT articles.id, articles.title, articles.summary, articles.url,
+                      articles.published_at, articles.discovered_at,
+                      sources.id AS source_id, sources.name AS source_name
+               FROM articles JOIN sources ON sources.id = articles.source_id
+               LEFT JOIN posts ON posts.article_id = articles.id
+               LEFT JOIN automation_jobs ON automation_jobs.article_id = articles.id
+               LEFT JOIN research_reviews ON research_reviews.article_id = articles.id
+               WHERE articles.id > ? AND sources.active = 1 AND posts.id IS NULL
+                 AND automation_jobs.article_id IS NULL AND research_reviews.article_id IS NULL
+                 AND datetime(articles.discovered_at) >= datetime(?)
+                 AND (articles.published_at IS NULL OR articles.published_at = ''
+                      OR datetime(articles.published_at) >= datetime(?))
+               ORDER BY COALESCE(datetime(articles.published_at), datetime(articles.discovered_at)) DESC,
+                        articles.id DESC LIMIT ?""",
+            (state["baseline_article_id"], cutoff_iso, cutoff_iso, limit),
+        ).fetchall()
+
+
+def save_research_reviews(path: Path, reviews: list[dict], reviewed_at: str) -> None:
+    with connect(path) as db:
+        db.executemany(
+            """INSERT OR REPLACE INTO research_reviews (article_id, score, reason, method, reviewed_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(item["article_id"], item["score"], item["reason"], item["method"], reviewed_at)
+             for item in reviews],
+        )
+
+
+def research_status(path: Path) -> dict:
+    with connect(path) as db:
+        row = db.execute("""SELECT MAX(reviewed_at) AS last_reviewed_at,
+                                   COUNT(*) AS total,
+                                   SUM(CASE WHEN method = 'ai' THEN 1 ELSE 0 END) AS ai_count
+                            FROM research_reviews""").fetchone()
+        return {"last_reviewed_at": row["last_reviewed_at"], "total": row["total"],
+                "ai_count": row["ai_count"] or 0}
 
 
 def list_publication_workflows(path: Path, limit: int = 25, offset: int = 0,
@@ -198,12 +341,54 @@ def drafted_article_ids(path: Path, article_ids: list[int]) -> set[int]:
 def overview_counts(path: Path) -> dict[str, int]:
     with connect(path) as db:
         counts = {
-            "sources": db.execute("SELECT COUNT(*) FROM sources").fetchone()[0],
+            "sources": db.execute("SELECT COUNT(*) FROM sources WHERE active = 1").fetchone()[0],
+            "source_errors": db.execute("SELECT COUNT(*) FROM sources WHERE active = 1 AND last_error IS NOT NULL").fetchone()[0],
             "articles": db.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
         }
         for row in db.execute("SELECT status, COUNT(*) AS total FROM posts GROUP BY status"):
             counts[row["status"]] = row["total"]
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
+        counts["stalled"] = db.execute(
+            "SELECT COUNT(*) FROM posts WHERE status = 'publishing' AND publishing_started_at <= ?",
+            (cutoff,),
+        ).fetchone()[0]
         return counts
+
+
+def daily_activity(path: Path, days: int = 7, now: datetime | None = None) -> list[dict]:
+    """Daily discovery and post counts in Bangkok time, including inactive days."""
+    if days not in {7, 30}:
+        raise ValueError("Khoảng thống kê không hợp lệ")
+    today = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("Asia/Bangkok")).date()
+    start = today - timedelta(days=days - 1)
+    rows = {
+        (start + timedelta(days=offset)).isoformat(): {
+            "day": (start + timedelta(days=offset)).isoformat(),
+            "label": (start + timedelta(days=offset)).strftime("%d/%m/%Y"),
+            "discovered": 0,
+            "created": 0,
+            "automatic": 0,
+            "published": 0,
+        }
+        for offset in range(days)
+    }
+    metrics = (
+        ("articles", "discovered_at", "discovered", ""),
+        ("posts", "created_at", "created", ""),
+        ("automation_jobs", "claimed_at", "automatic", "AND status IN ('ready', 'scheduled')"),
+        ("posts", "published_at", "published", "AND status = 'published'"),
+    )
+    with connect(path) as db:
+        for table, column, key, condition in metrics:
+            for result in db.execute(
+                f"""SELECT date({column}, '+7 hours') AS day, COUNT(*) AS total
+                    FROM {table}
+                    WHERE date({column}, '+7 hours') BETWEEN ? AND ? {condition}
+                    GROUP BY day""",
+                (start.isoformat(), today.isoformat()),
+            ):
+                rows[result["day"]][key] = result["total"]
+    return list(reversed(list(rows.values())))
 
 
 def save_articles(path: Path, source_id: int, articles: list[dict[str, str]]) -> int:
@@ -227,6 +412,11 @@ def save_articles(path: Path, source_id: int, articles: list[dict[str, str]]) ->
 def get_article(path: Path, article_id: int):
     with connect(path) as db:
         return db.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+
+
+def get_research_review(path: Path, article_id: int):
+    with connect(path) as db:
+        return db.execute("SELECT * FROM research_reviews WHERE article_id = ?", (article_id,)).fetchone()
 
 
 def make_draft(path: Path, article_id: int) -> int:
@@ -253,18 +443,56 @@ def make_automation_draft(path: Path, article_id: int) -> int:
         return cursor.lastrowid
 
 
-def list_posts(path: Path, limit: int = 50, offset: int = 0):
+POST_VIEWS = {
+    "all": (),
+    "action": ("blocked", "failed", "uncertain"),
+    "draft": ("draft",),
+    "scheduled": ("scheduled",),
+    "published": ("published",),
+}
+
+
+def post_filter(view: str, search: str) -> tuple[str, list]:
+    if view not in POST_VIEWS:
+        raise ValueError("Bộ lọc bài đăng không hợp lệ")
+    filters = []
+    parameters = []
+    statuses = POST_VIEWS[view]
+    if statuses:
+        clause = f"posts.status IN ({','.join('?' for _ in statuses)})"
+        if view == "action":
+            clause = (f"({clause} OR (posts.status = 'publishing' AND posts.publishing_started_at <= ?) "
+                      "OR (posts.status = 'published' AND posts.video_comment_status IN ('sending', 'uncertain')))")
+        filters.append(clause)
+        parameters.extend(statuses)
+        if view == "action":
+            parameters.append((datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat())
+    if search:
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        filters.append("(articles.title LIKE ? ESCAPE '\\' OR posts.body LIKE ? ESCAPE '\\')")
+        parameters.extend((f"%{escaped}%", f"%{escaped}%"))
+    return (f"WHERE {' AND '.join(filters)}" if filters else ""), parameters
+
+
+def list_posts(path: Path, limit: int = 50, offset: int = 0,
+               view: str = "all", search: str = ""):
     with connect(path) as db:
+        where, parameters = post_filter(view, search)
+        order = "posts.scheduled_at ASC, posts.id DESC" if view == "scheduled" else "posts.created_at DESC, posts.id DESC"
         return db.execute(
-            """SELECT posts.*, articles.title AS article_title, articles.url AS article_url
+            f"""SELECT posts.*, articles.title AS article_title, articles.url AS article_url,
+                      sources.name AS source_name
                FROM posts JOIN articles ON articles.id = posts.article_id
-               ORDER BY posts.created_at DESC, posts.id DESC LIMIT ? OFFSET ?""", (limit, offset)
+               JOIN sources ON sources.id = articles.source_id
+               {where} ORDER BY {order} LIMIT ? OFFSET ?""",
+            (*parameters, limit, offset)
         ).fetchall()
 
 
-def count_posts(path: Path) -> int:
+def count_posts(path: Path, view: str = "all", search: str = "") -> int:
     with connect(path) as db:
-        return db.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+        where, parameters = post_filter(view, search)
+        return db.execute(f"SELECT COUNT(*) FROM posts JOIN articles ON articles.id = posts.article_id {where}", parameters).fetchone()[0]
 
 
 def get_post_for_article(path: Path, article_id: int):
@@ -284,7 +512,7 @@ def get_post(path: Path, post_id: int):
 
 
 def attach_image(path: Path, post_id: int, image_file: str, source_url: str, kind: str = "source") -> None:
-    if kind not in {"source", "screenshot", "title_card", "ai_generated", "upload"}:
+    if kind not in {"source", "repo_asset", "screenshot", "title_card", "ai_generated", "router_generated", "upload"}:
         raise ValueError("Loại ảnh không hợp lệ")
     with connect(path) as db:
         first = db.execute("SELECT id FROM post_images WHERE post_id = ? ORDER BY sort_order, id LIMIT 1", (post_id,)).fetchone()
@@ -313,7 +541,7 @@ def get_post_image(path: Path, post_id: int, image_id: int):
 
 
 def add_post_image(path: Path, post_id: int, image_file: str, source_url: str, kind: str) -> int:
-    if kind not in {"source", "screenshot", "title_card", "ai_generated", "upload"}:
+    if kind not in {"source", "repo_asset", "screenshot", "title_card", "ai_generated", "router_generated", "upload"}:
         raise ValueError("Loại ảnh không hợp lệ")
     with connect(path) as db:
         post = db.execute("SELECT status FROM posts WHERE id = ?", (post_id,)).fetchone()
@@ -370,12 +598,27 @@ def active_post_titles(path: Path, since_iso: str, exclude_article_id: int) -> l
 
 def update_draft(path: Path, post_id: int, body: str) -> None:
     with connect(path) as db:
+        post = db.execute("SELECT video_url FROM posts WHERE id = ?", (post_id,)).fetchone()
+        if post:
+            from .video import with_video_notice
+            body = with_video_notice(body, post["video_url"])
         changed = db.execute(
             "UPDATE posts SET body = ?, status = 'draft', scheduled_at = NULL, last_error = NULL WHERE id = ? AND status IN ('draft', 'blocked', 'failed')",
             (body, post_id),
         ).rowcount
         if not changed:
             raise ValueError("Không thể sửa bài đã lên lịch hoặc đã đăng")
+
+
+def set_post_video(path: Path, post_id: int, video_url: str) -> None:
+    from .video import with_video_notice
+    with connect(path) as db:
+        post = db.execute("SELECT body, status FROM posts WHERE id = ?", (post_id,)).fetchone()
+        if post is None or post["status"] not in {"draft", "blocked", "failed"}:
+            raise ValueError("Chỉ có thể sửa video của bản nháp")
+        db.execute("UPDATE posts SET video_url = ?, body = ?, video_comment_status = '', "
+                   "video_comment_id = NULL, video_comment_error = NULL WHERE id = ?",
+                   (video_url, with_video_notice(post["body"], video_url), post_id))
 
 
 def schedule_post(path: Path, post_id: int, scheduled_at: str, test_only: bool = False) -> None:
@@ -403,10 +646,10 @@ def unschedule_post(path: Path, post_id: int) -> None:
 def claim_post(path: Path, post_id: int) -> bool:
     with connect(path) as db:
         return bool(db.execute(
-            """UPDATE posts SET status = 'publishing' WHERE id = ? AND
+            """UPDATE posts SET status = 'publishing', publishing_started_at = ? WHERE id = ? AND
                status IN ('draft', 'scheduled', 'blocked', 'failed') AND test_only = 0
                AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)""",
-            (post_id,),
+            (datetime.now(timezone.utc).isoformat(), post_id,),
         ).rowcount)
 
 
@@ -420,8 +663,10 @@ def claim_due_posts(path: Path, now_iso: str) -> list[int]:
         )]
         claimed = []
         for post_id in ids:
-            if db.execute("""UPDATE posts SET status = 'publishing' WHERE id = ? AND status = 'scheduled' AND test_only = 0
-                             AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)""", (post_id,)).rowcount:
+            if db.execute("""UPDATE posts SET status = 'publishing', publishing_started_at = ?
+                             WHERE id = ? AND status = 'scheduled' AND test_only = 0
+                             AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)""",
+                          (now_iso, post_id,)).rowcount:
                 claimed.append(post_id)
         return claimed
 
@@ -431,10 +676,61 @@ def finish_post(path: Path, post_id: int, status: str, error: str | None = None,
         raise ValueError("Trạng thái không hợp lệ")
     with connect(path) as db:
         db.execute(
-            """UPDATE posts SET status = ?, last_error = ?, platform_post_id = ?, published_at = ?
+            """UPDATE posts SET status = ?, last_error = ?, platform_post_id = ?, published_at = ?,
+                      publishing_started_at = NULL,
+                      video_comment_status = CASE WHEN ? = 'published' AND video_url != '' THEN 'pending' ELSE video_comment_status END
                WHERE id = ? AND status = 'publishing'""",
-            (status, error, platform_post_id, published_at, post_id),
+            (status, error, platform_post_id, published_at, status, post_id),
         )
+
+
+def pending_video_comment_ids(path: Path) -> list[int]:
+    with connect(path) as db:
+        return [row["id"] for row in db.execute(
+            "SELECT id FROM posts WHERE status = 'published' AND video_comment_status = 'pending' "
+            "AND platform_post_id IS NOT NULL ORDER BY published_at LIMIT 20")]
+
+
+def claim_video_comment(path: Path, post_id: int):
+    with connect(path) as db:
+        changed = db.execute(
+            "UPDATE posts SET video_comment_status = 'sending' WHERE id = ? AND status = 'published' "
+            "AND video_comment_status = 'pending' AND platform_post_id IS NOT NULL", (post_id,)).rowcount
+        if changed:
+            return db.execute("SELECT platform_post_id, video_url FROM posts WHERE id = ?", (post_id,)).fetchone()
+    return None
+
+
+def finish_video_comment(path: Path, post_id: int, comment_id: str | None = None, error: str | None = None) -> None:
+    with connect(path) as db:
+        db.execute("UPDATE posts SET video_comment_status = ?, video_comment_id = ?, video_comment_error = ? "
+                   "WHERE id = ? AND status = 'published' AND video_comment_status = 'sending'",
+                   ("posted" if comment_id else "uncertain", comment_id, error, post_id))
+
+
+def resolve_video_comment(path: Path, post_id: int, already_posted: bool) -> None:
+    with connect(path) as db:
+        status = "posted" if already_posted else "pending"
+        changed = db.execute(
+            "UPDATE posts SET video_comment_status = ?, video_comment_error = NULL WHERE id = ? "
+            "AND status = 'published' AND video_comment_status IN ('sending', 'uncertain') "
+            "AND platform_post_id IS NOT NULL AND video_url != ''", (status, post_id)).rowcount
+        if not changed:
+            raise ValueError("Bình luận video không ở trạng thái cần đối chiếu")
+
+
+def mark_stalled_post_uncertain(path: Path, post_id: int, now: datetime | None = None) -> None:
+    now = now or datetime.now(timezone.utc)
+    cutoff = (now - timedelta(minutes=45)).isoformat()
+    with connect(path) as db:
+        changed = db.execute(
+            """UPDATE posts SET status = 'uncertain', publishing_started_at = NULL,
+                      last_error = 'Không xác nhận được kết quả gửi. Kiểm tra Facebook Page trước khi thử lại.'
+               WHERE id = ? AND status = 'publishing' AND publishing_started_at <= ?""",
+            (post_id, cutoff),
+        ).rowcount
+        if not changed:
+            raise ValueError("Bài chưa đủ 45 phút ở trạng thái đang đăng hoặc đã đổi trạng thái")
 
 
 def resolve_uncertain_post(path: Path, post_id: int, was_published: bool) -> None:
@@ -480,7 +776,9 @@ def claim_automation_article(path: Path, now_iso: str, day_start: str, day_end: 
         retry = db.execute(
             """SELECT articles.*, automation_jobs.post_id AS automation_post_id
                FROM automation_jobs JOIN articles ON articles.id = automation_jobs.article_id
+               JOIN sources ON sources.id = articles.source_id
                WHERE automation_jobs.attempts < 3 AND automation_jobs.claimed_at >= ?
+                 AND sources.active = 1
                  AND ((automation_jobs.status = 'failed' AND
                        COALESCE(automation_jobs.last_attempt_at, automation_jobs.claimed_at) <= ?)
                    OR (automation_jobs.status = 'processing' AND
@@ -505,15 +803,25 @@ def claim_automation_article(path: Path, now_iso: str, day_start: str, day_end: 
             return None
         article = db.execute(
             """SELECT articles.*, NULL AS automation_post_id FROM articles
+               JOIN sources ON sources.id = articles.source_id
                LEFT JOIN posts ON posts.article_id = articles.id
                LEFT JOIN automation_jobs ON automation_jobs.article_id = articles.id
+               LEFT JOIN research_reviews ON research_reviews.article_id = articles.id
                WHERE articles.id > ? AND posts.id IS NULL AND automation_jobs.article_id IS NULL
+                 AND sources.active = 1
                  AND datetime(articles.discovered_at) >= datetime(?)
                  AND (articles.published_at IS NULL OR articles.published_at = ''
                       OR datetime(articles.published_at) >= datetime(?))
-               ORDER BY COALESCE(datetime(articles.published_at), datetime(articles.discovered_at)) DESC,
+               ORDER BY (SELECT COUNT(*) FROM automation_jobs AS daily_jobs
+                         JOIN articles AS daily_articles ON daily_articles.id = daily_jobs.article_id
+                         WHERE daily_jobs.claimed_at >= ? AND daily_jobs.claimed_at < ?
+                           AND daily_articles.source_id = articles.source_id
+                           AND (daily_jobs.status IN ('processing', 'ready', 'scheduled') OR
+                                (daily_jobs.status = 'failed' AND daily_jobs.attempts < 3))) ASC,
+                        COALESCE(research_reviews.score, -1) DESC,
+                        COALESCE(datetime(articles.published_at), datetime(articles.discovered_at)) DESC,
                         articles.id DESC LIMIT 1""",
-            (state["baseline_article_id"], cutoff_iso, cutoff_iso),
+            (state["baseline_article_id"], cutoff_iso, cutoff_iso, day_start, day_end),
         ).fetchone()
         if article is None:
             return None
@@ -558,7 +866,10 @@ def ready_automation_jobs(path: Path) -> list[sqlite3.Row]:
             """SELECT automation_jobs.article_id, automation_jobs.claimed_at,
                       posts.id AS post_id, posts.status AS post_status
                FROM automation_jobs JOIN posts ON posts.id = automation_jobs.post_id
-               WHERE automation_jobs.status = 'ready' ORDER BY automation_jobs.claimed_at LIMIT 20"""
+               JOIN articles ON articles.id = automation_jobs.article_id
+               JOIN sources ON sources.id = articles.source_id
+               WHERE automation_jobs.status = 'ready' AND sources.active = 1
+               ORDER BY automation_jobs.claimed_at LIMIT 20"""
         ).fetchall()
 
 

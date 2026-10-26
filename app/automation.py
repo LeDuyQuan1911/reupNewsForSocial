@@ -7,7 +7,7 @@ import logging
 import os
 import re
 
-from . import database, discovery, llm, media, queue
+from . import database, discovery, llm, media, queue, research, video
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -70,7 +70,21 @@ def prepare_articles(path: Path, now: datetime) -> int:
                 media.prepare_post_image(path, post_id)
                 image_paths = media.post_image_paths(path, post_id)
             body = llm.write_draft(article["title"], article["summary"], article["url"])
+            if post["source_kind"] != "github" and not post["video_url"]:
+                try:
+                    found_video = video.find_relevant_video(article["url"], article["title"], article["summary"])
+                    if found_video:
+                        database.set_post_video(path, post_id, found_video)
+                except Exception as exc:
+                    logging.warning("Video discovery skipped for article %s: %s", article_id, type(exc).__name__)
             database.update_draft(path, post_id, body)
+            try:
+                media.publishable_post_image_paths(path, post_id)
+            except media.MissingImageError as exc:
+                message = str(exc)
+                database.block_automation_draft(path, post_id, message)
+                database.finish_automation_job(path, article_id, "blocked", post_id, message)
+                continue
             for image_path in image_paths:
                 allowed, reason = llm.check_post(body, image_path.read_bytes())
                 if not allowed:
@@ -124,6 +138,11 @@ def schedule_ready(path: Path, now: datetime) -> int:
             database.finish_automation_job(path, job["article_id"], "failed", job["post_id"],
                                            "Bản nháp đã đổi trạng thái")
             continue
+        try:
+            media.publishable_post_image_paths(path, job["post_id"])
+        except media.MissingImageError as exc:
+            database.finish_automation_job(path, job["article_id"], "blocked", job["post_id"], str(exc))
+            continue
         slot = next_slot(now, reserved)
         if slot is None:
             break
@@ -135,7 +154,7 @@ def schedule_ready(path: Path, now: datetime) -> int:
 
 
 def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
-    result = {"found": 0, "prepared": 0, "scheduled": 0}
+    result = {"found": 0, "reviewed": 0, "prepared": 0, "scheduled": 0}
     if not enabled():
         return result
     now = now or datetime.now(timezone.utc)
@@ -143,6 +162,8 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
         result["found"], errors = discovery.scan_sources(path)
         for error in errors:
             logging.warning("Automatic source scan: %s", error)
+    if os.environ.get("REUP_LLM_MODEL", "").strip():
+        result["reviewed"] = research.review_candidates(path, now)["reviewed"]
     result["prepared"] = prepare_articles(path, now)
     result["scheduled"] = schedule_ready(path, now)
     return result

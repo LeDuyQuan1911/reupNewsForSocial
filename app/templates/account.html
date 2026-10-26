@@ -1,12 +1,30 @@
 {% extends 'base.html' %}
 {% block title %}Tài khoản · reupNewsForSocial{% endblock %}
 {% block content %}
-<div class="account-grid">
-  <section class="panel connection-card"><div class="section-heading"><h2>Tự động hóa</h2><span class="connection-state {{ 'ready' if automation_enabled else '' }}">{{ 'Đang chạy' if automation_enabled else 'Đang tắt' }}</span></div><p>Tự tìm tin mỗi giờ, chuẩn bị tối đa 6 bài mỗi ngày và kiểm duyệt cả nội dung lẫn ảnh. Khi có kết nối Page, bài đạt yêu cầu được xếp vào các giờ 07, 10, 13, 16, 19 và 22 (Bangkok).</p><small>{{ automation_status.counts.get('ready', 0) }} bài chờ Page · {{ automation_status.counts.get('scheduled', 0) }} bài đã lên lịch · {{ automation_status.counts.get('failed', 0) }} bài lỗi · {{ automation_status.counts.get('blocked', 0) }} bài bị chặn. {% if automation_status.last_scan_at %}Lần quét gần nhất: {{ automation_status.last_scan_at|bangkok_time }}.{% else %}Chưa quét tự động.{% endif %}</small><p><a class="source-link" href="{{ url_for('posts_page') }}">Xem bài đăng và lỗi →</a></p></section>
-  <section class="panel connection-card"><div class="section-heading"><h2>Facebook Page</h2><span class="connection-state {{ 'ready' if connections.page else '' }}">{{ 'Đã cấu hình' if connections.page else 'Chưa cấu hình' }}</span></div><p>Đăng ngay và lên lịch qua Page API sau khi nội dung và ảnh được duyệt.</p><small>Cần Page ID và Page access token trong biến môi trường.</small></section>
-  <section class="panel connection-card"><div class="section-heading"><h2>LLM viết bài</h2><span class="connection-state {{ 'ready' if connections.llm else '' }}">{{ 'Đã cấu hình' if connections.llm else 'Chưa cấu hình' }}</span></div><p>Viết lại bản nháp từ tiêu đề, tóm tắt và liên kết nguồn.</p><small>Cần cấu hình model qua 9Router hoặc endpoint tương thích.</small></section>
-  <section class="panel connection-card"><div class="section-heading"><h2>LLM duyệt ảnh</h2><span class="connection-state {{ 'ready' if connections.vision else '' }}">{{ 'Đã cấu hình' if connections.vision else 'Chưa cấu hình riêng' }}</span></div><p>Duyệt nội dung và ảnh trước khi gửi lên Facebook.</p><small>Nếu chưa đặt model riêng, hệ thống thử model viết bài; model đó phải hỗ trợ ảnh.</small></section>
-  <section class="panel connection-card"><div class="section-heading"><h2>Trang cá nhân & nhóm</h2><span class="connection-state">Chưa tích hợp</span></div><p>Phần kết nối và tự động đăng các đích này sẽ được làm sau khi chọn phương thức đăng phù hợp.</p></section>
+<div class="account-layout">
+  <section class="panel account-automation" aria-labelledby="automation-title">
+    <div class="section-heading"><h2 id="automation-title">Tự động hóa</h2><span class="connection-state {{ 'ready' if automation_enabled else '' }}">{{ 'Đã bật' if automation_enabled else 'Đang tắt' }}</span></div>
+    <div class="account-automation-body">
+      <p>Hệ thống tìm tin mỗi giờ, chuẩn bị tối đa 6 bài mỗi ngày và kiểm duyệt nội dung cùng ảnh. Khi đã cấu hình Facebook Page, bài đạt yêu cầu được xếp vào các giờ 07, 10, 13, 16, 19 và 22 (Bangkok).</p>
+      <dl class="account-metrics">
+        <div><dt>Sẵn sàng chờ lịch</dt><dd>{{ automation_status.counts.get('ready', 0) }}</dd></div>
+        <div><dt>Đã lên lịch</dt><dd>{{ automation_status.counts.get('scheduled', 0) }}</dd></div>
+        <div><dt>Cần xem lỗi</dt><dd>{{ automation_status.counts.get('failed', 0) }}</dd></div>
+        <div><dt>Bị chặn</dt><dd>{{ automation_status.counts.get('blocked', 0) }}</dd></div>
+      </dl>
+      <div class="account-scan"><span>Quét gần nhất: {{ automation_status.last_scan_at|bangkok_time if automation_status.last_scan_at else 'Chưa quét tự động' }}</span><a class="source-link" href="{{ url_for('posts_page', view='action') }}">Xem bài cần xử lý</a></div>
+    </div>
+  </section>
+
+  <section class="panel account-connections" aria-labelledby="connections-title">
+    <div class="section-heading"><h2 id="connections-title">Kết nối và kênh đăng</h2></div>
+    <div class="connection-row"><div><h3>Facebook Page</h3><p>Đăng hoặc lên lịch sau khi nội dung và ảnh được duyệt. Cần Page ID, Page access token và phiên bản Graph API. <a href="{{ url_for('facebook_page') }}">Xem cách kết nối Page</a>.</p></div><span class="connection-state {{ 'ready' if connections.page else '' }}">{{ 'Đủ thông số' if connections.page else 'Chưa đủ thông số' }}</span></div>
+    <div class="connection-row"><div><h3>AI viết bài</h3><p>Viết bản nháp từ tiêu đề, tóm tắt và liên kết nguồn qua 9Router hoặc endpoint tương thích.</p></div><span class="connection-state {{ 'ready' if connections.llm else '' }}">{{ 'Đã cấu hình' if connections.llm else 'Chưa cấu hình' }}</span></div>
+    <div class="connection-row"><div><h3>AI duyệt ảnh</h3><p>Kiểm tra nội dung và ảnh trước khi gửi. Model được chọn phải hỗ trợ ảnh.</p></div><span class="connection-state {{ 'ready' if connections.vision else '' }}">{{ 'Đã cấu hình' if connections.vision else 'Chưa cấu hình riêng' }}</span></div>
+    <div class="connection-row"><div><h3>AI tạo ảnh</h3><p>Khi bài gốc và repo không có ảnh dùng được, gọi model tạo ảnh qua 9Router cục bộ. Model viết bài hoặc xem ảnh không tự tạo ảnh.</p></div><span class="connection-state {{ 'ready' if connections.image else '' }}">{{ 'Đã cấu hình' if connections.image else 'Chưa cấu hình model ảnh' }}</span></div>
+    <div class="connection-row"><div><h3>Trang cá nhân và nhóm</h3><p>Chưa hỗ trợ đăng tự động lên các đích này.</p></div><span class="connection-state">Chưa tích hợp</span></div>
+  </section>
+
+  <p class="account-footnote">Cấu hình kết nối bằng các biến môi trường trong <code>.env.example</code>, rồi khởi động lại ứng dụng. Trạng thái ở đây chỉ cho biết đã đặt biến; chưa xác nhận token hoặc model hoạt động.</p>
 </div>
-<div class="next-step account-note"><span class="eyebrow">THIẾT LẬP</span><h3>Cấu hình trên máy cá nhân</h3><p>Xem <code>.env.example</code> trong thư mục dự án để biết tên các biến môi trường, rồi khởi động lại ứng dụng. Trang này chỉ cho biết biến đã được đặt; chưa xác nhận token hay model hoạt động.</p></div>
 {% endblock %}

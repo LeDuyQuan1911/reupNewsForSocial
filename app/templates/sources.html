@@ -1,7 +1,31 @@
 {% extends 'base.html' %}
 {% block title %}Nguồn thông tin · reupNewsForSocial{% endblock %}
 {% block content %}
-<div class="detail-grid"><section class="panel"><div class="section-heading"><div><span class="eyebrow">ĐANG THEO DÕI</span><h2>{{ sources|length }} nguồn tin</h2></div></div>
-{% if sources %}<div class="source-rows">{% for source in sources %}<div class="source-row"><span class="source-dot"></span><div><strong>{{ source.name }}</strong><small>{{ {'rss':'RSS/Atom','anthropic':'Trang tin','github':'GitHub'}.get(source.kind, source.kind) }}</small><a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }} ↗</a></div></div>{% endfor %}</div>{% else %}<div class="empty-state"><h3>Chưa có nguồn nào</h3></div>{% endif %}</section>
-<aside class="panel"><div class="section-heading"><div><span class="eyebrow">THÊM NGUỒN</span><h2>RSS hoặc Atom</h2></div></div><form class="add-source" action="{{ url_for('add_source') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label for="source-name">Tên nguồn</label><input id="source-name" name="name" placeholder="Ví dụ: Báo công nghệ" required maxlength="100"><label for="source-url">URL RSS/Atom</label><input id="source-url" name="url" type="url" placeholder="https://example.com/rss" required><button class="secondary" type="submit">+ Thêm nguồn tin</button></form></aside></div>
+<div class="source-layout">
+  <section class="panel source-panel" aria-labelledby="sources-title">
+    <div class="section-heading"><div><h1 id="sources-title">Nguồn thông tin</h1><p>{{ active_count }} nguồn đang quét, {{ sources|length - active_count }} nguồn tạm dừng.</p></div><span class="count">{{ sources|length }} nguồn</span></div>
+    {% if sources %}<div class="source-rows">{% for source in sources %}
+      <div class="source-row {{ 'is-paused' if not source.active else '' }}">
+        <span class="source-dot" aria-hidden="true"></span>
+        <div class="source-info"><strong>{{ source.name }}</strong><small>{{ {'rss':'RSS/Atom','anthropic':'Trang tin','github':'GitHub'}.get(source.kind, source.kind) }} · {{ 'Đang quét' if source.active else 'Tạm dừng' }}</small><a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>{% if source.last_error %}<small class="source-error">Quét lỗi: {{ source.last_error }}</small>{% elif source.last_checked_at %}<small class="source-checked">Quét gần nhất: {{ source.last_checked_at|bangkok_time }}</small>{% else %}<small class="source-checked">Chưa quét nguồn này</small>{% endif %}</div>
+        <form action="{{ url_for('toggle_source', source_id=source.id) }}" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="active" value="{{ '0' if source.active else '1' }}">
+          <button class="secondary source-toggle" type="submit" aria-label="{{ 'Tạm dừng' if source.active else 'Bật lại' }} nguồn {{ source.name }}">{{ 'Tạm dừng' if source.active else 'Bật lại' }}</button>
+        </form>
+      </div>
+    {% endfor %}</div>
+    {% else %}<div class="empty-state"><h2>Chưa có nguồn tin</h2><p>Thêm RSS hoặc Atom để bắt đầu tìm bài.</p></div>{% endif %}
+  </section>
+  <aside class="panel source-add" aria-labelledby="add-source-title">
+    <div class="section-heading"><h2 id="add-source-title">Thêm nguồn RSS hoặc Atom</h2></div>
+    <p class="source-add-help">Hệ thống quét nguồn đang bật mỗi giờ khi tự động hóa hoạt động. Tạm dừng sẽ giữ tin cũ, ngừng chọn bài mới từ nguồn này; lịch đã đặt vẫn giữ nguyên.</p>
+    <form class="add-source" action="{{ url_for('add_source') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="source-name">Tên nguồn</label><input id="source-name" name="name" placeholder="Ví dụ: Báo công nghệ…" autocomplete="off" required maxlength="100">
+      <label for="source-url">URL RSS/Atom</label><input id="source-url" name="url" type="url" placeholder="https://example.com/rss…" autocomplete="off" required>
+      <button class="primary" type="submit">Thêm nguồn tin</button>
+    </form>
+  </aside>
+</div>
 {% endblock %}
