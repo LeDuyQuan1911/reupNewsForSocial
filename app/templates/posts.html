@@ -1,9 +1,31 @@
 {% extends 'base.html' %}
 {% block title %}Bài đăng · reupNewsForSocial{% endblock %}
 {% block content %}
-<div class="page-actions"><a class="secondary button-link" href="{{ url_for('articles_page') }}">Chọn bài báo →</a></div>
-<section class="panel"><div class="section-heading"><h2>Hàng đợi và lịch sử</h2><span class="count">{{ total }} bài</span></div>
-{% if posts %}<div class="post-rows">{% for post in posts %}<a class="post-row" href="{{ url_for('edit_post', post_id=post.id) }}"><div><strong>{{ post.article_title }}</strong><small>{% if post.scheduled_at %}Lịch đăng: {{ post.scheduled_at|bangkok_time }}{% elif post.published_at %}Đã đăng: {{ post.published_at|bangkok_time }}{% else %}Tạo: {{ post.created_at[:16] }}{% endif %}</small></div><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></a>{% endfor %}</div>
-{% else %}<div class="empty-state"><h3>Chưa có bài đăng</h3><p>Chọn một bài báo để tạo bản nháp.</p></div>{% endif %}</section>
-{% if total > page_size %}<nav class="pagination" aria-label="Trang bài đăng">{% if page > 1 %}<a href="{{ url_for('posts_page', page=page-1) }}">← Trang trước</a>{% endif %}<span>Trang {{ page }} / {{ (total + page_size - 1) // page_size }}</span>{% if page * page_size < total %}<a href="{{ url_for('posts_page', page=page+1) }}">Trang sau →</a>{% endif %}</nav>{% endif %}
+<div class="list-toolbar">
+  <div><h1 class="sr-only">Bài đăng</h1><p class="toolbar-summary">Theo dõi bản nháp, lịch đăng và những bài cần xử lý.</p></div>
+  <a class="primary button-link" href="{{ url_for('articles_page') }}">Chọn bài báo để viết</a>
+</div>
+<nav class="queue-tabs" aria-label="Lọc bài đăng">
+  {% for view, label in [('all', 'Tất cả'), ('action', 'Cần xử lý'), ('draft', 'Bản nháp'), ('scheduled', 'Đã lên lịch'), ('published', 'Đã đăng')] %}
+  <a href="{{ url_for('posts_page', view=view, q=search) }}" class="{{ 'active' if selected_view == view else '' }}" {% if selected_view == view %}aria-current="page"{% endif %}>{{ label }} <span>{{ view_counts[view] }}</span></a>
+  {% endfor %}
+</nav>
+<form class="queue-search" action="{{ url_for('posts_page') }}" method="get" role="search">
+  <input type="hidden" name="view" value="{{ selected_view }}">
+  <label for="post-search">Tìm trong bài đăng</label>
+  <input id="post-search" type="search" name="q" value="{{ search }}" placeholder="Tiêu đề hoặc nội dung bài…" autocomplete="off">
+  <button class="secondary" type="submit">Tìm bài</button>
+  {% if search %}<a class="clear-filter" href="{{ url_for('posts_page', view=selected_view) }}">Xóa tìm kiếm</a>{% endif %}
+</form>
+<section class="panel queue-panel" aria-label="Danh sách bài đăng">
+  <div class="section-heading"><h2>{{ {'all':'Tất cả bài đăng', 'action':'Bài cần xử lý', 'draft':'Bản nháp', 'scheduled':'Lịch sắp đăng', 'published':'Bài đã đăng'}[selected_view] }}</h2><span class="count">{{ total }} bài</span></div>
+  {% if posts %}<div class="post-rows">{% for post in posts %}
+    <a class="post-row" href="{{ url_for('edit_post', post_id=post.id) }}">
+      <div class="post-row-main"><span class="post-source">{{ post.source_name }}</span><strong>{{ post.article_title }}</strong><small>{% if post.status == 'published' and post.published_at %}Đã đăng: {{ post.published_at|bangkok_time }}{% elif post.status == 'scheduled' and post.scheduled_at %}{{ 'Lịch thử nghiệm' if post.test_only else 'Lịch đăng' }}: {{ post.scheduled_at|bangkok_time }}{% else %}Tạo: {{ post.created_at[:16] }}{% endif %}</small></div>
+      <span class="post-status {{ post.status }}">{{ 'Cần kiểm tra bình luận' if post.status == 'published' and post.video_comment_status in ['sending','uncertain'] else 'Lịch thử nghiệm · không đăng' if post.test_only and post.status == 'scheduled' else {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span>
+    </a>
+  {% endfor %}</div>
+  {% else %}<div class="empty-state"><h3>Chưa có bài phù hợp</h3><p>{{ 'Thử từ khóa khác hoặc đổi bộ lọc.' if search else 'Chọn bài báo để tạo bản nháp đầu tiên.' if selected_view == 'all' else 'Không có bài trong nhóm này.' }}</p><a class="source-link" href="{{ url_for('articles_page') if selected_view == 'all' else url_for('posts_page') }}">{{ 'Chọn bài báo' if selected_view == 'all' else 'Xem tất cả bài đăng' }}</a></div>{% endif %}
+</section>
+{% if total > page_size %}<nav class="pagination" aria-label="Trang bài đăng">{% if page > 1 %}<a href="{{ url_for('posts_page', view=selected_view, q=search, page=page-1) }}">Trang trước</a>{% endif %}<span>Trang {{ page }} / {{ (total + page_size - 1) // page_size }}</span>{% if page * page_size < total %}<a href="{{ url_for('posts_page', view=selected_view, q=search, page=page+1) }}">Trang sau</a>{% endif %}</nav>{% endif %}
 {% endblock %}

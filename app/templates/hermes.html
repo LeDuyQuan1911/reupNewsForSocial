@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Điều khiển Hermes · reupNewsForSocial{% endblock %}
+{% block content %}
+<div class="hermes-layout" data-status-url="{{ url_for('hermes_status') }}">
+  <section class="panel" aria-labelledby="hermes-title">
+    <div class="section-heading"><div><h1 id="hermes-title">Điều khiển Hermes</h1><p>Theo dõi và điều khiển lịch tự động trên máy này.</p></div><span class="connection-state" id="hermes-state" role="status">Đang kiểm tra</span></div>
+    <div class="hermes-body">
+      <p class="hermes-error" id="hermes-error" role="alert" hidden></p>
+      <dl class="hermes-facts">
+        <div><dt>Gateway</dt><dd id="hermes-gateway">Đang kiểm tra</dd></div>
+        <div><dt>Lịch Hermes</dt><dd id="hermes-job">Đang kiểm tra</dd></div>
+        <div><dt>Lượt xử lý gần nhất</dt><dd>{{ cycle.at|bangkok_time if cycle and cycle.at else 'Chưa ghi nhận' }}</dd></div>
+        <div><dt>Kết quả</dt><dd>{{ 'Thành công' if cycle and cycle.status == 'ok' else 'Lỗi' if cycle and cycle.status == 'failed' else 'Chưa có' }}</dd></div>
+      </dl>
+      <div class="hermes-controls">
+        <form action="{{ url_for('hermes_action', action='run') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" id="hermes-run" type="submit" disabled>Chạy một lượt bây giờ</button></form>
+        <form action="{{ url_for('hermes_action', action='pause') }}" method="post" id="hermes-pause-form" hidden><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tạm dừng lịch</button></form>
+        <form action="{{ url_for('hermes_action', action='resume') }}" method="post" id="hermes-resume-form" hidden><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tiếp tục lịch</button></form>
+      </div>
+      <p class="hermes-note">Chạy một lượt sẽ thực hiện cả xử lý bài đến giờ và tìm nguồn nếu hôm nay chưa quét. Tạm dừng sẽ ngừng kiểm tra lịch, kể cả bài đã đến giờ, cho đến khi bạn tiếp tục.</p>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="posting-settings-title">
+    <div class="section-heading"><div><h2 id="posting-settings-title">Số bài và giờ đăng</h2><p>Giờ Bangkok · áp dụng cho bài được xếp lịch sau khi lưu.</p></div></div>
+    <div class="posting-settings-body">
+      <form class="posting-settings-form" action="{{ url_for('update_posting_settings') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="posting-settings-field"><label for="posts-per-day">Bài mỗi ngày</label><input id="posts-per-day" type="number" name="posts_per_day" min="1" max="24" value="{{ posting_settings.posts_per_day }}" required><small>Từ 1 đến 24 bài.</small></div>
+        <div class="posting-settings-field posting-times-field"><span class="posting-times-label" id="posting-times-label">Giờ đăng</span><div class="posting-times-grid" id="posting-times-grid" aria-labelledby="posting-times-label">{% for posting_time in posting_settings.times %}<div class="posting-time-slot"><label for="posting-time-{{ loop.index }}">Bài {{ loop.index }}</label><input id="posting-time-{{ loop.index }}" type="time" name="posting_times" value="{{ posting_time }}" step="60" required><button class="secondary posting-time-pick" type="button" aria-label="Chọn giờ cho bài {{ loop.index }}">Chọn giờ</button></div>{% endfor %}</div><small>Chọn một giờ cho mỗi bài; các giờ phải cách nhau ít nhất 30 phút.</small></div>
+        <button class="primary" type="submit">Lưu lịch đăng</button>
+      </form>
+      <template id="posting-time-template"><div class="posting-time-slot"><label></label><input type="time" name="posting_times" step="60" required><button class="secondary posting-time-pick" type="button">Chọn giờ</button></div></template>
+      <div class="posting-settings-scan"><div><strong>Tìm báo và repo mới</strong><p>Hermes bắt đầu quét lúc 00:00 giờ Bangkok mỗi ngày khi máy đang chạy, chọn và chuẩn bị tối đa {{ posting_settings.posts_per_day }} bài cho các giờ đăng hôm đó. Nếu máy tắt lúc nửa đêm, lượt quét chạy bù khi Hermes hoạt động lại. Bạn cũng có thể quét thủ công bất cứ lúc nào.</p></div><form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tìm bài mới</button></form></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="hermes-runs-title">
+    <div class="section-heading"><div><h2 id="hermes-runs-title">Hoạt động gần đây</h2><p>Những lượt chạy cuối cùng do Hermes ghi nhận.</p></div></div>
+    <div class="hermes-body">
+      <ol class="hermes-runs" id="hermes-runs" hidden></ol><p class="hermes-empty" id="hermes-empty">Đang tải lịch sử chạy…</p>
+      <p class="hermes-note">Lượt xử lý gần nhất: {{ cycle.prepared if cycle and cycle.prepared is defined else 0 }} bài chuẩn bị, {{ cycle.scheduled if cycle and cycle.scheduled is defined else 0 }} bài lên lịch. <a href="{{ url_for('posts_page', view='action') }}">Xem bài cần xử lý →</a></p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='posting-times.js') }}" defer></script><script src="{{ url_for('static', filename='hermes-status.js') }}" defer></script>{% endblock %}

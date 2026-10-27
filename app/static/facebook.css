@@ -1,0 +1,56 @@
+.facebook-page-setup { margin-bottom: 17px; }
+.facebook-page-setup .section-heading h1 { font-size: 23px; }
+.facebook-page-content { padding: 20px 23px 21px; }
+.facebook-connected { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 15px; padding: 19px 20px; border: 1px solid #cbdce9; border-radius: 7px; background: #f5f9fc; }
+.facebook-connected > div { min-width: 0; }
+.facebook-connected-label { color: #42647b; font-size: 11px; font-weight: 750; letter-spacing: .08em; }
+.facebook-connected h2 { margin: 5px 0 3px; color: var(--ink); font-size: 21px; overflow-wrap: anywhere; }
+.facebook-connected p { margin: 3px 0 0; color: var(--muted-ink); font-size: 12px; line-height: 1.5; }
+.facebook-connected .button-link { flex: none; }
+.facebook-setup-details { margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--line); }
+.facebook-setup-details summary { color: var(--blue); cursor: pointer; font-weight: 700; }
+.facebook-setup-details ol { margin-top: 15px; }
+.facebook-page-content > p { max-width: 850px; margin: 0 0 14px; color: var(--muted-ink); line-height: 1.55; }
+.facebook-page-content ol { display: grid; gap: 9px; max-width: 900px; margin: 0 0 16px; padding-left: 22px; line-height: 1.55; }
+.facebook-page-content li { padding-left: 5px; }
+.facebook-page-content code { padding: 2px 5px; border-radius: 4px; background: #edf2f6; color: #234457; overflow-wrap: anywhere; }
+.facebook-page-content .facebook-page-footnote { margin-bottom: 0; font-size: 12px; }
+.facebook-deferred { margin-top: 17px; }
+.facebook-deferred > summary { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 17px 22px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font: 650 17px Bahnschrift, "Segoe UI", sans-serif; cursor: pointer; list-style: none; }
+.facebook-deferred > summary::-webkit-details-marker { display: none; }
+.facebook-deferred > summary::after { content: "⌄"; margin-left: auto; color: var(--blue); font-size: 22px; line-height: 1; }
+.facebook-deferred[open] > summary::after { transform: rotate(180deg); }
+.facebook-deferred > summary span { color: var(--muted-ink); font: 600 12px "Segoe UI", sans-serif; }
+.facebook-deferred > summary:focus-visible { outline: 3px solid #58b7eb; outline-offset: 2px; }
+.facebook-deferred[open] > summary { margin-bottom: 17px; }
+.facebook-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; align-items: start; gap: 17px; }
+.facebook-heading h2 { font-size: 20px; }
+.facebook-side { display: grid; gap: 17px; }
+.facebook-caution { margin: 19px 22px 4px; padding: 15px 17px; border-left: 3px solid #c78432; border-radius: 4px; background: #fff8ed; color: #614925; }
+.facebook-caution strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.facebook-caution p { margin: 0; font-size: 12px; line-height: 1.55; }
+.facebook-group-list { padding: 0 22px; }
+.facebook-group { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 0; border-top: 1px solid var(--line); }
+.facebook-group:first-child { border-top: 0; }
+.facebook-group.is-paused { opacity: .7; }
+.facebook-group-main { min-width: 0; }
+.facebook-group-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.facebook-group h2 { margin: 0; font-size: 16px; line-height: 1.35; }
+.facebook-group-main > a { display: block; margin-top: 7px; color: var(--blue); font-size: 12px; overflow-wrap: anywhere; }
+.facebook-state { padding: 4px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; }
+.facebook-state.selected { color: #1c6745; background: #e4f3e8; }
+.facebook-state.paused { color: #647884; background: #edf1f3; }
+.facebook-group-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+.facebook-group-actions form { margin: 0; }
+.facebook-group-actions button { min-height: 36px; padding: 7px 11px; font-size: 12px; }
+.facebook-delete { border: 0; background: transparent; color: #9c4b3b; cursor: pointer; }
+.facebook-delete:hover { text-decoration: underline; }
+.facebook-empty { padding: 42px 22px; }
+.facebook-add form { display: grid; gap: 8px; padding: 19px 21px 22px; }
+.facebook-add label { color: #385a70; font-size: 12px; font-weight: 700; }
+.facebook-add input { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #bdccd7; border-radius: 6px; background: #fff; color: var(--ink); }
+.facebook-add input:focus-visible { outline: 3px solid #b8d7ff; outline-offset: 1px; border-color: var(--blue); }
+.facebook-add p, .facebook-page-status p { margin: 4px 0 8px; color: var(--muted-ink); font-size: 12px; line-height: 1.55; }
+.facebook-add button { justify-self: start; }
+@media (max-width: 960px) { .facebook-layout { grid-template-columns: 1fr; } .facebook-side { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .facebook-side { grid-template-columns: 1fr; } .facebook-group { align-items: flex-start; flex-direction: column; } .facebook-group-actions { width: 100%; } .facebook-caution { margin: 16px 17px 3px; } .facebook-group-list { padding: 0 17px; } .facebook-page-content { padding: 18px; } .facebook-page-setup .section-heading { flex-wrap: wrap; } .facebook-connected { align-items: flex-start; flex-direction: column; padding: 16px; } }

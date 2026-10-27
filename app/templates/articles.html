@@ -2,18 +2,20 @@
 {% block title %}Bài báo · reupNewsForSocial{% endblock %}
 {% block content %}
 <div class="page-actions">
-  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
+  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm báo / repo mới ↗</button></form>
 </div>
-<form class="filter-bar" action="{{ url_for('articles_page') }}" method="get">
-  <label for="article-search">Tìm bài</label><input id="article-search" name="q" value="{{ search }}" placeholder="Tiêu đề hoặc tóm tắt">
+<form class="filter-bar" action="{{ url_for('articles_page') }}" method="get" role="search">
+  <label for="article-search">Tìm bài</label><input id="article-search" name="q" type="search" value="{{ search }}" placeholder="Nhập tiêu đề hoặc từ khóa…" autocomplete="off">
   <label for="article-source">Nguồn</label><select id="article-source" name="source"><option value="">Tất cả nguồn</option>{% for source in sources %}<option value="{{ source.id }}" {% if selected_source == source.id %}selected{% endif %}>{{ source.name }}</option>{% endfor %}</select>
-  <button class="secondary" type="submit">Lọc</button>
+  <label for="article-view">Tiến độ</label><select id="article-view" name="view"><option value="all" {% if selected_view == 'all' %}selected{% endif %}>Tất cả</option><option value="reviewed" {% if selected_view == 'reviewed' %}selected{% endif %}>Đã đánh giá</option><option value="unselected" {% if selected_view == 'unselected' %}selected{% endif %}>Chưa chọn viết</option><option value="selected" {% if selected_view == 'selected' %}selected{% endif %}>Đã tạo bài đăng</option></select>
+  <button class="secondary" type="submit">Tìm và lọc</button>
 </form>
-<section class="panel articles-panel"><div class="section-heading"><div><span class="eyebrow">DANH SÁCH</span><h2>Bài đã tìm thấy</h2></div><span class="count">{{ total }} bài</span></div>
+<section class="panel articles-panel"><div class="section-heading"><h2>Bài đã tìm thấy</h2><span class="count">{{ total }} bài</span></div>
 {% if articles %}<div class="article-list">{% for article in articles %}<article class="article"><div class="article-meta"><span>{{ article.source_name }}</span><span>·</span><span>{{ article.published_at[:10] if article.published_at else 'Mới tìm thấy' }}</span></div>
   <h3><a href="{{ url_for('article_detail', article_id=article.id) }}">{{ article.title }}</a></h3>{% if article.summary %}<p>{{ article.summary }}</p>{% endif %}
+  {% if article.research_score is not none %}<p class="research-note"><strong>Ưu tiên {{ article.research_score }}/100</strong> · {{ article.research_reason }}{% if article.research_method == 'fallback' %} <span class="muted">(đánh giá dự phòng)</span>{% endif %}</p>{% endif %}
   <div class="article-actions"><a class="source-link" href="{{ article.url }}" target="_blank" rel="noopener noreferrer">Đọc bài gốc ↗</a>
   {% if article.id not in posted_articles %}<form action="{{ url_for('draft_article', article_id=article.id) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="text-button" type="submit">Tạo bản nháp →</button></form>{% else %}<span class="draft-label">Đã có bản nháp</span>{% endif %}</div></article>{% endfor %}</div>
 {% else %}<div class="empty-state"><h3>Không tìm thấy bài phù hợp</h3><p>Thử đổi bộ lọc hoặc tìm bài mới từ nguồn tin.</p></div>{% endif %}</section>
-{% if total > page_size %}<nav class="pagination" aria-label="Trang bài báo">{% if page > 1 %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, page=page-1) }}">← Trang trước</a>{% endif %}<span>Trang {{ page }} / {{ (total + page_size - 1) // page_size }}</span>{% if page * page_size < total %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, page=page+1) }}">Trang sau →</a>{% endif %}</nav>{% endif %}
+{% if total > page_size %}<nav class="pagination" aria-label="Trang bài báo">{% if page > 1 %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, view=selected_view, page=page-1) }}">← Trang trước</a>{% endif %}<span>Trang {{ page }} / {{ (total + page_size - 1) // page_size }}</span>{% if page * page_size < total %}<a href="{{ url_for('articles_page', source=selected_source or '', q=search, view=selected_view, page=page+1) }}">Trang sau →</a>{% endif %}</nav>{% endif %}
 {% endblock %}

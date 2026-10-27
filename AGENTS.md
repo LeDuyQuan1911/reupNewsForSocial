@@ -37,3 +37,12 @@
 ## Khi bàn giao
 
 Tóm tắt file đã đổi, lý do, kết quả kiểm tra, giới hạn còn lại, bước tiếp theo và đường dẫn worklog.
+
+## Ngữ cảnh biên tập cho Hermes trong repo này
+
+- Nguồn đang vận hành: RSS/Atom và bài chính thức từ hãng công nghệ, cùng repo GitHub mới nổi. Reddit và Threads là nguồn có thể thêm sau, chưa được quét tự động.
+- Số bài tự động mỗi ngày và các giờ đăng Facebook Page do chủ dự án đặt trong trang Tài khoản; mặc định 6 bài ở các giờ đã lưu. Đăng nhóm/trang cá nhân để sau. Không tự gửi bài chưa được duyệt nội dung và từng ảnh; tránh tin trùng và giữ URL nguồn gốc.
+- Bài đăng viết bằng tiếng Việt cho cộng đồng IT: mở bằng chi tiết đáng chú ý có căn cứ, giải thích điểm mới và giá trị thực tế bằng đoạn ngắn. Dùng **ít nhất một icon/emoji có ý nghĩa**, nhưng để model tự chọn số lượng, vị trí và biểu tượng; không áp mẫu mỗi dòng một icon. Thêm 2–5 hashtag liên quan. Không sao chép câu chữ hoặc bịa dữ kiện.
+- Mỗi bài có ít nhất một ảnh nhận diện ngay chủ thể: ưu tiên ảnh bài gốc, demo/screenshot/README của repo, rồi ảnh chụp repo. Ảnh AI chỉ là dự phòng khi không có ảnh thật, phải có chi tiết bám sát nguồn; thẻ tiêu đề chung chung không đủ điều kiện đăng.
+- Nếu nguồn có video liên quan và kiểm chứng được URL, bài báo có thể hẹn video dưới bình luận; chỉ bình luận link sau khi bài Page đăng thành công.
+- Khi viết bản nháp, dashboard gọi Hermes như tác giả qua model 9Router. Mỗi lượt soạn nạp `docs/editorial-brief.md` và dữ kiện nguồn. Hermes cron điều phối quét/chuẩn bị/lịch đăng qua runner của repo; các giới hạn và bước duyệt trước đăng vẫn ở code ứng dụng. Các bước AI khác dùng model 9Router trực tiếp. Key và Page token chỉ nằm trong biến môi trường, không đưa vào file hoặc câu trả lời.

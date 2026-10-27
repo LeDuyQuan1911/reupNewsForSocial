@@ -1,25 +1,73 @@
 {% extends 'base.html' %}
 {% block title %}Tổng quan · reupNewsForSocial{% endblock %}
 {% block content %}
-<div class="page-actions">
-  <a class="secondary button-link" href="{{ url_for('workflow_page') }}">Xem luồng đăng →</a>
-  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not counts.sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
-</div>
-<section class="stat-grid" aria-label="Số liệu tổng quan">
-  <a class="stat-card" href="{{ url_for('articles_page') }}"><span>Bài đã tìm thấy</span><strong>{{ counts.articles }}</strong><small>Xem bài báo →</small></a>
-  <a class="stat-card" href="{{ url_for('sources_page') }}"><span>Nguồn đang theo dõi</span><strong>{{ counts.sources }}</strong><small>Quản lý nguồn →</small></a>
-  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Bản nháp</span><strong>{{ counts.get('draft', 0) }}</strong><small>Mở bài đăng →</small></a>
-  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Đã lên lịch</span><strong>{{ counts.get('scheduled', 0) }}</strong><small>Xem lịch đăng →</small></a>
+<section class="home-hero dashboard-toolbar" aria-label="Dashboard">
+  <div>
+    <h1 class="sr-only">Tổng quan</h1>
+    <span class="home-kicker">Hoạt động của hệ thống</span>
+  </div>
+  <div class="home-actions">
+    <form action="{{ url_for('discover') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="primary" type="submit" {% if not counts.sources %}disabled{% endif %}>Tìm báo / repo mới ↗</button>
+    </form>
+    <a class="secondary button-link" href="{{ url_for('workflow_page') }}">Xem luồng đăng →</a>
+  </div>
 </section>
-{% if counts.get('uncertain', 0) %}<div class="notice error"><a href="{{ url_for('posts_page') }}">{{ counts.uncertain }} bài cần đối chiếu kết quả trên Facebook Page →</a></div>{% endif %}
-<div class="overview-grid">
-  <section class="panel"><div class="section-heading"><div><span class="eyebrow">KHÁM PHÁ</span><h2>Bài báo gần đây</h2></div><a class="section-link" href="{{ url_for('articles_page') }}">Xem tất cả →</a></div>
-    {% if articles %}<div class="compact-list">{% for article in articles %}<a href="{{ url_for('article_detail', article_id=article.id) }}"><span>{{ article.source_name }}</span><strong>{{ article.title }}</strong></a>{% endfor %}</div>
-    {% else %}<div class="empty-state"><h3>Chưa có bài báo</h3><p>Thêm nguồn rồi bấm “Tìm bài mới”.</p></div>{% endif %}
-  </section>
-  <section class="panel"><div class="section-heading"><div><span class="eyebrow">XUẤT BẢN</span><h2>Bài đăng gần đây</h2></div><a class="section-link" href="{{ url_for('posts_page') }}">Xem tất cả →</a></div>
-    {% if posts %}<div class="compact-list">{% for post in posts %}<a href="{{ url_for('edit_post', post_id=post.id) }}"><strong>{{ post.article_title }}</strong><span class="post-status {{ post.status }}">{{ {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(post.status,post.status) }}</span></a>{% endfor %}</div>
-    {% else %}<div class="empty-state"><h3>Chưa có bài đăng</h3><p>Chọn bài báo để tạo bản nháp đầu tiên.</p></div>{% endif %}
-  </section>
-</div>
+
+<section class="stat-grid dashboard-today" aria-label="Hoạt động hôm nay">
+  <a class="stat-card" href="{{ url_for('articles_page') }}"><span>Tin tìm thấy hôm nay</span><strong>{{ activity[0].discovered }}</strong><small>Xem bài báo →</small></a>
+  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Bài viết tạo hôm nay</span><strong>{{ activity[0].created }}</strong><small>Xem bài đăng →</small></a>
+  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Bài tự động đạt hôm nay</span><strong>{{ activity[0].automatic }}<em> / {{ posting_settings.posts_per_day }}</em></strong><small>Đã chuẩn bị và duyệt →</small></a>
+  <a class="stat-card" href="{{ url_for('posts_page') }}"><span>Đã đăng hôm nay</span><strong>{{ activity[0].published }}</strong><small>Xem kết quả →</small></a>
+</section>
+
+{% set action_count = counts.get('uncertain', 0) + counts.get('failed', 0) + counts.get('blocked', 0) + counts.get('stalled', 0) %}
+{% if action_count %}<div class="action-alert"><span class="action-alert-mark" aria-hidden="true">!</span><div><strong>{{ action_count }} bài cần xử lý</strong><p>{{ counts.get('stalled', 0) }} đang đăng quá lâu, {{ counts.get('uncertain', 0) }} cần đối chiếu, {{ counts.get('failed', 0) }} lỗi đăng, {{ counts.get('blocked', 0) }} bị chặn.</p></div><a href="{{ url_for('posts_page', view='action') }}">Mở hàng đợi</a></div>{% endif %}
+
+<section class="panel daily-panel" aria-labelledby="daily-title">
+  <div class="section-heading daily-heading">
+    <div><span class="eyebrow">THỐNG KÊ THEO NGÀY</span><h2 id="daily-title">Hoạt động từng ngày</h2><p>Mốc ngày theo giờ Bangkok · ngày không có hoạt động vẫn được hiển thị.</p></div>
+    <nav class="daily-range" aria-label="Khoảng thời gian">
+      <a href="{{ url_for('dashboard', days=7) }}" class="{{ 'active' if selected_days == 7 else '' }}" {% if selected_days == 7 %}aria-current="page"{% endif %}>7 ngày</a>
+      <a href="{{ url_for('dashboard', days=30) }}" class="{{ 'active' if selected_days == 30 else '' }}" {% if selected_days == 30 %}aria-current="page"{% endif %}>30 ngày</a>
+    </nav>
+  </div>
+  <div class="daily-chart" aria-hidden="true">
+    {% for item in chart_activity %}
+    <div class="daily-bar">
+      <span class="daily-bar-value">{{ item.created }}</span>
+      <div class="daily-bar-track"><span class="daily-bar-fill" style="height: {{ (item.created * 100 / chart_max)|round|int }}%"></span></div>
+      <span class="daily-bar-label">{{ item.day[5:] }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="daily-legend"><span class="legend-dot"></span>Bài viết được tạo mỗi ngày trong 7 ngày gần nhất</div>
+  <p class="mobile-scroll-hint">Vuốt ngang trong bảng để xem đủ các cột.</p>
+  <div class="daily-list" role="region" aria-label="Bảng hoạt động theo ngày" tabindex="0">
+    <table class="daily-table">
+      <thead><tr><th scope="col">Ngày</th><th scope="col">Tin tìm thấy</th><th scope="col">Bài viết tạo</th><th scope="col">Tự động đạt</th><th scope="col">Đã đăng</th></tr></thead>
+      <tbody>
+        {% for item in activity %}
+        <tr class="{{ 'today' if loop.first else '' }}">
+          <th scope="row" class="daily-date"><time datetime="{{ item.day }}">{{ item.label }}</time>{% if loop.first %}<span>Hôm nay</span>{% endif %}</th>
+          <td class="daily-metric"><strong>{{ item.discovered }}</strong></td>
+          <td class="daily-metric"><strong>{{ item.created }}</strong></td>
+          <td class="daily-metric daily-auto"><strong>{{ item.automatic }} / {{ item.target }}</strong><progress value="{{ item.automatic }}" max="{{ item.target }}" aria-label="Bài tự động đạt ngày {{ item.label }}">{{ item.automatic }} / {{ item.target }}</progress></td>
+          <td class="daily-metric"><strong>{{ item.published }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="daily-note">“Bài viết tạo” tính các bản nháp thủ công và tự động. “Tự động đạt” là bài đã được hệ thống chuẩn bị, kiểm duyệt đạt; chưa có nghĩa đã đăng Facebook.</p>
+</section>
+
+<section class="dashboard-status" aria-label="Trạng thái hệ thống">
+  <span class="connection-state {{ 'ready' if automation_enabled else '' }}">Tự động hóa {{ 'đang bật' if automation_enabled else 'đang tắt' }}</span>
+  <span>{{ counts.sources }} nguồn đang theo dõi</span>
+  {% if counts.source_errors %}<a class="source-error-link" href="{{ url_for('sources_page') }}">{{ counts.source_errors }} nguồn quét lỗi</a>{% endif %}
+  <span>Quét tự động gần nhất: {{ automation_status.last_scan_at|bangkok_time if automation_status.last_scan_at else 'Chưa có' }}</span>
+  <a href="{{ url_for('hermes_page') }}">Điều khiển Hermes →</a>
+</section>
 {% endblock %}

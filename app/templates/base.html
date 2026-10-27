@@ -3,12 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
   <title>{% block title %}reupNewsForSocial{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui-refresh.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-redesign.css') }}">
+  {% block page_styles %}{% endblock %}
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Đi tới nội dung</a>
   <header class="topbar">
-    <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark">R</span><span>reupNewsForSocial</span></a>
+    <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark" aria-hidden="true">R</span><span>reupNewsForSocial</span></a>
     <span class="mode">Bản chạy trên máy cá nhân</span>
   </header>
   <div class="app-layout">
@@ -18,12 +23,15 @@
       <a class="{{ 'active' if request.endpoint == 'workflow_page' else '' }}" href="{{ url_for('workflow_page') }}" {% if request.endpoint == 'workflow_page' %}aria-current="page"{% endif %}>Luồng đăng</a>
       <a class="{{ 'active' if request.endpoint in ['posts_page', 'edit_post'] else '' }}" href="{{ url_for('posts_page') }}" {% if request.endpoint in ['posts_page', 'edit_post'] %}aria-current="page"{% endif %}>Bài đăng</a>
       <a class="{{ 'active' if request.endpoint == 'sources_page' else '' }}" href="{{ url_for('sources_page') }}" {% if request.endpoint == 'sources_page' %}aria-current="page"{% endif %}>Nguồn thông tin</a>
+      <a class="{{ 'active' if request.endpoint in ['hermes_page', 'hermes_action', 'update_posting_settings'] else '' }}" href="{{ url_for('hermes_page') }}" {% if request.endpoint in ['hermes_page', 'hermes_action', 'update_posting_settings'] %}aria-current="page"{% endif %}>Hermes</a>
+      <a class="{{ 'active' if request.endpoint in ['facebook_page', 'add_facebook_group', 'toggle_facebook_group', 'remove_facebook_group'] else '' }}" href="{{ url_for('facebook_page') }}" {% if request.endpoint == 'facebook_page' %}aria-current="page"{% endif %}>Facebook</a>
       <a class="{{ 'active' if request.endpoint == 'account_page' else '' }}" href="{{ url_for('account_page') }}" {% if request.endpoint == 'account_page' %}aria-current="page"{% endif %}>Tài khoản</a>
     </nav>
-    <main class="shell {% block shell_class %}{% endblock %}">
+    <main id="main-content" class="shell {% block shell_class %}{% endblock %}">
       {% for category, message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}
       {% block content %}{% endblock %}
     </main>
   </div>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

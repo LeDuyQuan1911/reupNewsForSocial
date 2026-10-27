@@ -1,9 +1,14 @@
 """Prepare a local JPEG for each post from its article or GitHub repository."""
 
+import base64
+import hashlib
 from html.parser import HTMLParser
 from http.client import HTTPSConnection
 from io import BytesIO
 import ipaddress
+import json
+import logging
+import os
 from pathlib import Path
 import re
 import socket
@@ -20,6 +25,8 @@ from . import database
 MAX_PAGE_BYTES = 1_500_000
 MAX_IMAGE_BYTES = 8_000_000
 MAX_IMAGE_PIXELS = 20_000_000
+PREFERRED_IMAGE_COUNT = 3
+MAX_SOURCE_IMAGE_ATTEMPTS = 8
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
@@ -79,7 +86,7 @@ class ImageMetadataParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.metadata = {}
-        self.first_image = ""
+        self.images = []
 
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
@@ -87,18 +94,78 @@ class ImageMetadataParser(HTMLParser):
             key = values.get("property") or values.get("name")
             if key in {"og:image", "twitter:image"} and values.get("content"):
                 self.metadata[key] = values["content"]
-        elif tag == "img" and not self.first_image:
-            self.first_image = values.get("src", "")
+        elif tag == "img":
+            candidate = values.get("src") or values.get("data-src")
+            if candidate:
+                self.images.append((candidate, values.get("alt", "")))
 
 
-def find_article_image(article_url: str) -> str:
+def find_article_images(article_url: str, title: str = "") -> list[str]:
     data, final_url = fetch_public_bytes(article_url, MAX_PAGE_BYTES)
     parser = ImageMetadataParser()
     parser.feed(data.decode("utf-8", errors="replace"))
-    candidate = parser.metadata.get("og:image") or parser.metadata.get("twitter:image") or parser.first_image
-    if not candidate:
+    keywords = set(re.findall(r"\w{4,}", title.casefold()))
+    images = sorted(parser.images, key=lambda item: len(keywords & set(re.findall(r"\w{4,}", item[1].casefold()))), reverse=True)
+    candidates = [parser.metadata.get("og:image"), parser.metadata.get("twitter:image")]
+    candidates.extend(candidate for candidate, _ in images)
+    urls = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        url = urljoin(final_url, candidate)
+        if url not in urls and urlparse(url).scheme == "https":
+            urls.append(url)
+        if len(urls) >= 12:
+            break
+    if not urls:
         raise MissingImageError("Bài gốc không có ảnh có thể lấy được")
-    return urljoin(final_url, candidate)
+    return urls
+
+
+def find_article_image(article_url: str) -> str:
+    return find_article_images(article_url)[0]
+
+
+def repository_image_urls(repo_url: str) -> list[str]:
+    match = re.fullmatch(r"https://github\.com/([^/?#]+)/([^/?#]+)/?", repo_url)
+    if not match:
+        raise ValueError("URL repo GitHub không hợp lệ")
+    owner, repo = match.groups()
+    raw, _ = fetch_public_bytes(f"https://api.github.com/repos/{owner}/{repo}/readme", MAX_PAGE_BYTES)
+    document = json.loads(raw)
+    readme_url = document.get("download_url", "")
+    if urlparse(readme_url).hostname != "raw.githubusercontent.com":
+        raise ValueError("URL README GitHub không hợp lệ")
+    markdown = base64.b64decode(document["content"]).decode("utf-8", errors="replace")
+    references = re.findall(r"!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))", markdown)
+    candidates = [(left or right, alt) for alt, left, right in references]
+    candidates.extend((url, "") for url in re.findall(
+        r"<img\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)", markdown, flags=re.IGNORECASE))
+    urls = []
+    seen = set()
+    for candidate, alt in candidates:
+        url = urljoin(readme_url, candidate)
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or re.search(r"(?:badge|shield|avatar|logo|icon)", parsed.path, re.IGNORECASE):
+            continue
+        if url not in seen:
+            description = f"{parsed.path} {alt}".casefold()
+            score = 2 if re.search(r"(?:demo|screenshot|screen-shot|preview|showcase|product|interface|workflow)", description) else 0
+            urls.append((score, url))
+            seen.add(url)
+        if len(urls) >= 12:
+            break
+    return [url for _, url in sorted(urls, key=lambda item: -item[0])]
+
+
+def first_usable_image(urls: list[str]) -> tuple[bytes, str]:
+    for url in urls:
+        try:
+            raw, final_url = fetch_public_bytes(url, MAX_IMAGE_BYTES)
+            return normalized_jpeg(raw), final_url
+        except Exception:
+            continue
+    raise MissingImageError("Không tải được ảnh đủ lớn từ nguồn")
 
 
 def screenshot_repository(url: str) -> bytes:
@@ -184,6 +251,17 @@ def post_image_paths(database_path: Path, post_id: int) -> list[Path]:
     return [post_image_path(database_path, image, post_id) for image in images]
 
 
+def publishable_post_image_paths(database_path: Path, post_id: int) -> list[Path]:
+    """Require a real illustration or source image before sending a post to a Page."""
+    images = database.list_post_images(database_path, post_id)
+    if not images:
+        raise MissingImageError("Bài đăng phải có ít nhất một ảnh")
+    if all(image["kind"] == "title_card" for image in images):
+        raise MissingImageError("Ảnh thẻ tiêu đề chỉ là ảnh tạm; hãy thêm ảnh bài gốc hoặc ảnh minh họa trước khi đăng")
+    return [post_image_path(database_path, image, post_id)
+            for image in images if image["kind"] != "title_card"]
+
+
 def save_post_image(database_path: Path, post_id: int, image: bytes, source_url: str,
                     kind: str, append: bool = True) -> Path:
     media_dir = database_path.parent / "media"
@@ -208,30 +286,132 @@ def save_uploaded_post_image(database_path: Path, post_id: int, raw: bytes) -> P
     return save_post_image(database_path, post_id, normalized_jpeg(raw), "", "upload")
 
 
+def generated_or_placeholder(post) -> tuple[bytes, str]:
+    if os.environ.get("REUP_LLM_IMAGE_MODEL", "").strip():
+        try:
+            from . import llm
+            image = llm.generate_image(post["article_title"], post["article_summary"] or "")
+            return normalized_jpeg(image), "router_generated"
+        except Exception as exc:
+            logging.warning("9Router image generation unavailable for post %s: %s", post["id"], type(exc).__name__)
+    return normalized_jpeg(title_card(post["article_title"], post["source_name"], post["article_url"])), "title_card"
+
+
+def generated_companion(post, used_hashes: set[bytes]) -> tuple[bytes, str, str] | None:
+    """Create one distinct, source-grounded second image when real assets are scarce."""
+    if not os.environ.get("REUP_LLM_IMAGE_MODEL", "").strip():
+        return None
+    try:
+        from . import llm
+        image = normalized_jpeg(llm.generate_image(
+            post["article_title"], post["article_summary"] or "", variant=2,
+        ))
+        digest = hashlib.sha256(image).digest()
+        if digest in used_hashes:
+            return None
+        used_hashes.add(digest)
+        return image, post["article_url"], "router_generated"
+    except Exception as exc:
+        logging.warning("9Router companion image unavailable for post %s: %s", post["id"], type(exc).__name__)
+        return None
+
+
 def prepare_post_image(database_path: Path, post_id: int, append: bool = False) -> Path:
     post = database.get_post(database_path, post_id)
     if post is None:
         raise ValueError("Bản nháp không tồn tại")
     if post["status"] not in {"draft", "blocked", "failed"}:
         raise ValueError("Không thể thay ảnh của bài đã lên lịch hoặc đã đăng")
-    if post["source_kind"] == "github":
+    existing = database.list_post_images(database_path, post_id)
+    if append and len(existing) >= 10:
+        raise ValueError("Mỗi bài tối đa 10 ảnh")
+    target = 1 if append else min(PREFERRED_IMAGE_COUNT, 11 - len(existing))
+    used_urls = {image["source_url"] for image in existing if image["source_url"]} if append else set()
+    used_hashes = set()
+    if append:
+        for image in existing:
+            try:
+                used_hashes.add(hashlib.sha256(post_image_path(database_path, image, post_id).read_bytes()).digest())
+            except MissingImageError:
+                continue
+    kind = "repo_asset" if post["source_kind"] == "github" else "source"
+    candidates = []
+    if kind == "source" and post["article_image_url"]:
+        candidates.append(urljoin(post["article_url"], post["article_image_url"]))
+    try:
+        candidates.extend(repository_image_urls(post["article_url"]) if kind == "repo_asset"
+                          else find_article_images(post["article_url"], post["article_title"]))
+    except Exception as exc:
+        logging.info("Could not list source images for post %s: %s", post_id, type(exc).__name__)
+    saved = []
+    seen_urls = set()
+    for url in candidates:
+        if len(saved) >= target or len(seen_urls) >= MAX_SOURCE_IMAGE_ATTEMPTS:
+            break
+        if url in seen_urls or url in used_urls:
+            continue
+        seen_urls.add(url)
         try:
-            image = normalized_jpeg(screenshot_repository(post["article_url"]))
-            kind = "screenshot"
-        except Exception:
-            image = normalized_jpeg(title_card(post["article_title"], post["source_name"], post["article_url"]))
-            kind = "title_card"
-        source_url = post["article_url"]
-    else:
-        source_url = post["article_url"]
-        try:
-            candidate = post["article_image_url"] or find_article_image(post["article_url"])
-            source_url = urljoin(post["article_url"], candidate)
-            raw, source_url = fetch_public_bytes(source_url, MAX_IMAGE_BYTES)
+            raw, final_url = fetch_public_bytes(url, MAX_IMAGE_BYTES)
+            if final_url in used_urls:
+                continue
             image = normalized_jpeg(raw)
-            kind = "source"
         except Exception:
-            source_url = post["article_url"]
-            image = normalized_jpeg(title_card(post["article_title"], post["source_name"], source_url))
-            kind = "title_card"
-    return save_post_image(database_path, post_id, image, source_url, kind, append=append)
+            continue
+        digest = hashlib.sha256(image).digest()
+        if digest in used_hashes:
+            continue
+        used_hashes.add(digest)
+        used_urls.add(final_url)
+        saved.append((image, final_url, kind))
+    existing_real = sum(image["kind"] != "title_card" for image in existing)
+    if kind == "repo_asset" and len(saved) + existing_real < 2:
+        try:
+            screenshot = normalized_jpeg(screenshot_repository(post["article_url"]))
+            digest = hashlib.sha256(screenshot).digest()
+            if digest not in used_hashes:
+                saved.append((screenshot, post["article_url"], "screenshot"))
+        except Exception:
+            pass
+    if len(saved) + existing_real == 1 and len(saved) < target:
+        companion = generated_companion(post, used_hashes)
+        if companion:
+            saved.append(companion)
+    if not saved:
+        if append:
+            companion = generated_companion(post, used_hashes) if existing_real == 1 else None
+            if companion:
+                saved.append(companion)
+            else:
+                raise MissingImageError("Không còn ảnh mới đủ lớn và khác ảnh đã có từ nguồn")
+    if not saved:
+        image, fallback_kind = generated_or_placeholder(post)
+        first_path = save_post_image(database_path, post_id, image, post["article_url"], fallback_kind, append=False)
+        if fallback_kind == "router_generated":
+            companion = generated_companion(post, {hashlib.sha256(image).digest()})
+            if companion:
+                save_post_image(database_path, post_id, *companion)
+        return first_path
+    first_path = None
+    for index, (image, source_url, image_kind) in enumerate(saved):
+        path = save_post_image(database_path, post_id, image, source_url, image_kind,
+                               append=append or index > 0)
+        if first_path is None:
+            first_path = path
+    if append:
+        for image in existing:
+            if image["kind"] == "title_card" and len(database.list_post_images(database_path, post_id)) > 1:
+                database.remove_post_image(database_path, post_id, image["id"])
+    return first_path
+
+
+def ensure_multiple_images(database_path: Path, post_id: int) -> None:
+    """Top up an editable draft without requiring a manual image upload."""
+    post = database.get_post(database_path, post_id)
+    if post is None or post["status"] not in {"draft", "blocked", "failed"}:
+        return
+    images = database.list_post_images(database_path, post_id)
+    real_count = sum(image["kind"] != "title_card" for image in images)
+    if real_count >= 2:
+        return
+    prepare_post_image(database_path, post_id, append=real_count == 1)

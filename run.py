@@ -7,8 +7,14 @@ import time
 import logging
 
 
+def hermes_owns_automation(path: Path) -> bool:
+    return (path.parent / "hermes-automation.enabled").exists()
+
+
 def run_scheduler(path: Path):
     while True:
+        if hermes_owns_automation(path):
+            return
         try:
             process_due_posts(path)
         except Exception:
@@ -18,6 +24,8 @@ def run_scheduler(path: Path):
 
 def run_automation(path: Path):
     while True:
+        if hermes_owns_automation(path):
+            return
         try:
             run_cycle(path)
         except Exception:
@@ -27,6 +35,7 @@ def run_automation(path: Path):
 
 if __name__ == "__main__":
     app = create_app()
-    Thread(target=run_scheduler, args=(app.config["DATABASE_PATH"],), daemon=True).start()
-    Thread(target=run_automation, args=(app.config["DATABASE_PATH"],), daemon=True).start()
+    if not hermes_owns_automation(app.config["DATABASE_PATH"]):
+        Thread(target=run_scheduler, args=(app.config["DATABASE_PATH"],), daemon=True).start()
+        Thread(target=run_automation, args=(app.config["DATABASE_PATH"],), daemon=True).start()
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

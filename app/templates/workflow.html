@@ -2,31 +2,44 @@
 {% block title %}Luồng đăng · reupNewsForSocial{% endblock %}
 {% block content %}
 <section class="panel workflow-panel" aria-labelledby="workflow-title">
-  <div class="section-heading"><h1 id="workflow-title">Luồng đăng</h1><span class="count">{{ total }} {{ 'bài báo' if selected_view == 'all' else 'bài đăng' }}</span></div>
-  <nav class="workflow-views" aria-label="Xem luồng đăng"><a class="{{ 'active' if selected_view == 'posts' else '' }}" href="{{ url_for('workflow_page') }}" {% if selected_view == 'posts' %}aria-current="page"{% endif %}>Đã chọn đăng ({{ post_total }})</a><a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ url_for('workflow_page', view='all') }}" {% if selected_view == 'all' %}aria-current="page"{% endif %}>Tất cả bài báo ({{ article_total }})</a></nav>
-  <details class="workflow-help"><summary>Cách đọc luồng</summary><p>Mỗi dòng đi từ nguồn tin đến bài báo, kênh đăng và thời điểm. Ứng dụng hiện chỉ hỗ trợ Facebook Page. “Lịch đăng” là giờ dự kiến; “Đã đăng” là giờ hệ thống ghi nhận sau khi gửi thành công.</p></details>
+  <div class="section-heading workflow-heading">
+    <div><h1 id="workflow-title">Luồng đăng</h1><p>Kiểm tra bài nào cần xử lý, đăng lên đâu và vào lúc nào.</p></div>
+    <span class="count">{{ total }} {{ 'bài báo' if selected_view == 'all' else 'bài đăng' }}</span>
+  </div>
+  <nav class="workflow-views" aria-label="Xem luồng đăng">
+    <a class="{{ 'active' if selected_view == 'posts' else '' }}" href="{{ url_for('workflow_page') }}" {% if selected_view == 'posts' %}aria-current="page"{% endif %}>Đã chọn đăng ({{ post_total }})</a>
+    <a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ url_for('workflow_page', view='all') }}" {% if selected_view == 'all' %}aria-current="page"{% endif %}>Tất cả bài báo ({{ article_total }})</a>
+  </nav>
   {% if workflows %}
-  <div class="workflow-list">
-    {% for item in workflows %}
-    <article class="workflow-item" aria-label="Luồng đăng cho {{ item.article_title }}">
-      <ol class="workflow-steps">
-        <li><span class="workflow-label">Nguồn</span><a class="workflow-value" href="{{ url_for('sources_page') }}">{{ item.source_name }}</a></li>
-        <li><span class="workflow-label">Bài báo</span><a class="workflow-value" href="{{ url_for('article_detail', article_id=item.article_id) }}">{{ item.article_title }}</a></li>
-        <li><span class="workflow-label">Đăng lên đâu</span>
-          {% if item.post_id %}<a class="workflow-value" href="{{ url_for('edit_post', post_id=item.post_id) }}">{{ 'Chưa gửi · Facebook Page' if item.post_test_only else 'Facebook Page' }}</a><span class="post-status {{ item.post_status }}">{{ 'Lịch thử nghiệm · không đăng' if item.post_test_only and item.post_status == 'scheduled' else {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(item.post_status,item.post_status) }}</span>
-          {% else %}<span class="workflow-value muted-value">Chưa chọn</span><a class="workflow-hint" href="{{ url_for('article_detail', article_id=item.article_id) }}">Tạo bản nháp →</a>{% endif %}
-        </li>
-        <li><span class="workflow-label">Lúc mấy giờ</span>
-          {% if item.post_status == 'published' %}<strong class="workflow-value">Đã đăng</strong>{% if item.post_published_at %}<time datetime="{{ item.post_published_at }}">{{ item.post_published_at|bangkok_time }} (Bangkok)</time>{% else %}<span class="workflow-hint">Chưa ghi nhận giờ đăng</span>{% endif %}
-          {% elif item.post_status == 'scheduled' %}<strong class="workflow-value">{{ 'Lịch thử nghiệm' if item.post_test_only else 'Lịch đăng' }}</strong>{% if item.post_scheduled_at %}<time datetime="{{ item.post_scheduled_at }}">{{ item.post_scheduled_at|bangkok_time }} (Bangkok)</time>{% else %}<span class="workflow-hint">Chưa ghi nhận giờ hẹn</span>{% endif %}
-          {% elif item.post_status == 'publishing' %}<strong class="workflow-value">Đang gửi</strong><span class="workflow-hint">Chưa có giờ đăng xác nhận</span>
-          {% elif item.post_status == 'uncertain' %}<strong class="workflow-value">Cần đối chiếu</strong><span class="workflow-hint">Chưa xác nhận được giờ đăng</span>
-          {% elif item.post_id %}<strong class="workflow-value muted-value">Chưa lên lịch</strong>
-          {% else %}<strong class="workflow-value muted-value">Chưa có bài đăng</strong>{% endif %}
-        </li>
-      </ol>
-    </article>
-    {% endfor %}
+  <div class="workflow-table-wrap">
+    <table class="workflow-table">
+      <thead><tr><th scope="col">Bài báo và nguồn</th><th scope="col">Trạng thái</th><th scope="col">Đăng lên</th><th scope="col">Thời gian (Bangkok)</th><th scope="col">Thao tác</th></tr></thead>
+      <tbody>
+        {% for item in workflows %}
+        <tr>
+          <th scope="row" class="workflow-story">
+            <a href="{{ url_for('article_detail', article_id=item.article_id) }}">{{ item.article_title }}</a>
+            <span>{{ item.source_name }}</span>
+          </th>
+          <td class="workflow-state">
+            <span class="post-status {{ item.post_status or '' }}">{{ 'Lịch thử nghiệm' if item.post_test_only and item.post_status == 'scheduled' else {'draft':'Bản nháp','scheduled':'Đã lên lịch','publishing':'Đang đăng','published':'Đã đăng','blocked':'Bị chặn','failed':'Lỗi đăng','uncertain':'Cần đối chiếu'}.get(item.post_status, 'Chưa có bản nháp') }}</span>
+            {% if item.post_test_only and item.post_status == 'scheduled' %}<small>Không tự đăng</small>
+            {% elif item.post_status == 'draft' %}<small>Cần viết và lên lịch</small>
+            {% elif item.post_status in ('blocked', 'failed', 'uncertain', 'publishing') %}<small>Cần kiểm tra bài đăng</small>
+            {% elif not item.post_id %}<small>Chọn bài để viết</small>{% endif %}
+          </td>
+          <td class="workflow-destination">{{ 'Facebook Page' if item.post_id else 'Chưa chọn' }}{% if item.post_id and item.post_status != 'published' %}<small>{{ 'Lịch thử nghiệm' if item.post_test_only else 'Chưa kết nối' if not page_ready else 'Dự kiến' }}</small>{% endif %}</td>
+          <td class="workflow-time">
+            {% if item.post_status == 'published' and item.post_published_at %}<time datetime="{{ item.post_published_at }}">{{ item.post_published_at|bangkok_time }}</time><small>Đã đăng</small>
+            {% elif item.post_status == 'scheduled' and item.post_scheduled_at %}<time datetime="{{ item.post_scheduled_at }}">{{ item.post_scheduled_at|bangkok_time }}</time><small>{{ 'Lịch thử nghiệm' if item.post_test_only else 'Lịch đăng' }}</small>
+            {% elif item.post_status in ('publishing', 'uncertain') %}<span>Chưa xác nhận</span>
+            {% else %}<span>Chưa lên lịch</span>{% endif %}
+          </td>
+          <td class="workflow-action"><a href="{{ url_for('edit_post', post_id=item.post_id) if item.post_id else url_for('article_detail', article_id=item.article_id) }}">{{ 'Mở bài đăng' if item.post_id else 'Xem để tạo nháp' }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}<div class="empty-state"><h2>{{ 'Chưa có bài báo' if selected_view == 'all' else 'Chưa có bản nháp' }}</h2><p>{{ 'Thêm nguồn tin và tìm bài mới để bắt đầu luồng đăng.' if selected_view == 'all' else 'Chọn một bài báo để tạo bản nháp và xem luồng đăng tại đây.' }}</p><a class="source-link" href="{{ url_for('sources_page') if selected_view == 'all' else url_for('articles_page') }}">{{ 'Mở nguồn thông tin' if selected_view == 'all' else 'Chọn bài báo' }} →</a></div>{% endif %}
 </section>
