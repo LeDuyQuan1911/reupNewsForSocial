@@ -235,3 +235,10 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: giữ CI trên runner Windows tạm. Server dùng Scheduled Task của tài khoản sở hữu Hermes để poll `main` mỗi 5 phút, yêu cầu workflow `push` thành công cho đúng SHA. Trước checkout, tạm dừng cron và đợi lượt Hermes kết thúc; backup SQLite, kiểm tra ứng dụng với DB tạm rồi HTTP, phục hồi nếu lỗi trước khi tiếp tục cron. Không tự triển khai PR hoặc commit CI đỏ.
 - Lý do: server không cần mở cổng SSH cho GitHub, không nhận token trong CI và không sửa dữ liệu cục bộ khi cập nhật code.
 - Hệ quả / khi nào xem lại: phải bật required check trên GitHub sau khi workflow chạy lần đầu và cài task trên server; dữ liệu/ảnh vẫn cần backup độc lập, sự cố sau khi đã gửi Page phải đối chiếu thủ công.
+
+### 2026-10-27 — Không phục hồi DB sau khi Hermes có thể đã chạy lại
+
+- Bối cảnh: review độc lập phát hiện dashboard có thể nhận thao tác đăng bài giữa health check và bước hoàn tất cập nhật; rollback từ bản sao cũ sẽ làm mất trạng thái Page đã đăng.
+- Quyết định: giữ dashboard trong chế độ bảo trì khi có `data/deployment-paused`, chỉ cho `/healthz` phản hồi. Bắt đầu thử `hermes cron resume` là ranh giới sau đó không tự phục hồi DB; nếu lỗi, giữ bảo trì để chủ dự án đối chiếu trạng thái thực tế.
+- Lý do: trạng thái đăng bài sau thời điểm đó có thể đã đổi trên Facebook; ghi đè DB cũ tạo nguy cơ đăng trùng.
+- Hệ quả / khi nào xem lại: cần thao tác phục hồi thủ công nếu lỗi sau ranh giới này; kiểm chứng end-to-end trên server Windows khi cài máy.

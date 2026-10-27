@@ -2,7 +2,7 @@
 
 Repo triển khai: `LeDuyQuan1911/reupNewsForSocial`. File `github-main-ruleset.json` ghi cấu hình mong muốn cho ruleset nhánh `main`, gồm PR và check `Python tests (Windows)` chạy trên mã mới nhất của `main`.
 
-Ruleset từ `setupSourceVibeCode` chỉ là nguồn mẫu. Chưa xác nhận ruleset tương đương đã bật trên GitHub của `reupNewsForSocial`. Sau khi workflow CI chạy lần đầu, áp dụng file JSON vào **đúng repo này**; xem [`docs/deployment.md`](../docs/deployment.md).
+Ruleset từ `setupSourceVibeCode` chỉ là nguồn mẫu. Ngày 2026-10-27, [ruleset #25950396](https://github.com/LeDuyQuan1911/reupNewsForSocial/rules/25950396) đã được bật trên GitHub cho `reupNewsForSocial` sau lượt CI đầu tiên; xem [`docs/deployment.md`](../docs/deployment.md).
 
 - Người đóng góp fork repo công khai và mở PR vào `main`; họ không cần quyền Write trên repo gốc.
 - Cấu hình mong muốn yêu cầu PR và check CI mới nhất, chặn force push và xóa `main`. Chủ repo merge bằng nút thường sau khi đáp ứng yêu cầu.

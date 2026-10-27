@@ -6,13 +6,13 @@
 2. Ruleset `main` yêu cầu check trên và yêu cầu nhánh PR cập nhật với `main`. Chủ repo xem review rồi quyết định merge.
 3. Commit thực tế trên `main` chạy CI lần nữa. Nếu thất bại, commit vẫn ở `main` nhưng máy chủ không nhận nó.
 4. Task Scheduler trên máy chủ gọi `scripts/cd/update-server.ps1` mỗi 5 phút. Script fetch `main`, yêu cầu đúng SHA đó có lượt CI **push** thành công, rồi mới cập nhật. Lượt CI của PR không đủ điều kiện.
-5. Script tạm dừng cron Hermes, đợi lượt đang chạy, dừng dashboard do nó quản lý, sao lưu SQLite, checkout đúng SHA, cài phụ thuộc và kiểm tra bằng DB tạm. Sau khi HTTP `/` trả 200, script cập nhật runner Hermes và tiếp tục cron. Nếu bước trước khi tiếp tục cron lỗi, script phục hồi code và DB từ bản sao rồi chạy lại bản cũ.
+5. Script tạm dừng cron Hermes, đợi lượt đang chạy, dừng dashboard do nó quản lý, sao lưu SQLite, checkout đúng SHA, cài phụ thuộc và kiểm tra bằng DB tạm. Dashboard mới chỉ phục vụ `/healthz` trong lúc cập nhật, các thao tác khác nhận 503. Sau khi health check đạt, script cập nhật runner Hermes và tiếp tục cron. Nếu bước trước khi thử tiếp tục cron lỗi, script phục hồi code và DB từ bản sao rồi chạy lại bản cũ. Nếu đã thử tiếp tục cron, script giữ trạng thái bảo trì và yêu cầu đối chiếu thủ công thay vì ghi đè DB.
 
-Không có cơ chế bỏ qua CI khi GitHub API không truy cập được. `data/`, `.venv/` và biến môi trường User không nằm trong Git; checkout mã nguồn không thay chúng. Bản sao SQLite lưu trong `data/backups/` trên máy chủ. Script hiện chỉ phục hồi dữ liệu khi lỗi xảy ra **trước lúc tiếp tục cron**; sự cố sau khi đã đăng bài cần đối chiếu thủ công với Facebook để tránh đăng trùng.
+Không có cơ chế bỏ qua CI khi GitHub API không truy cập được. `data/`, `.venv/` và biến môi trường User không nằm trong Git; checkout mã nguồn không thay chúng. Bản sao SQLite lưu trong `data/backups/` trên máy chủ. Sự cố sau khi đã thử tiếp tục cron cần đối chiếu thủ công với Facebook để tránh đăng trùng.
 
 ## Kích hoạt CI trên GitHub
 
-`.github/workflows/ci.yml` cần được merge vào `main` trước. Đợi lượt Actions đầu tiên có check tên `Python tests (Windows)`. Sau đó áp dụng `governance/github-main-ruleset.json` cho **repo `LeDuyQuan1911/reupNewsForSocial`** tại Settings → Rules → Rulesets, hoặc cập nhật ruleset hiện có bằng GitHub API. File JSON trong repo chỉ là cấu hình mong muốn, tự nó không bật bảo vệ trên GitHub. Kiểm tra một PR thật: check đỏ/chưa chạy phải chặn merge; check xanh mới cho merge.
+Ruleset [#25950396](https://github.com/LeDuyQuan1911/reupNewsForSocial/rules/25950396) đã bật trên GitHub ngày 2026-10-27 và yêu cầu `Python tests (Windows)` cùng trạng thái cập nhật với `main`. File `governance/github-main-ruleset.json` là bản cấu hình mong muốn; chỉnh file này không tự đồng bộ lên GitHub. Workflow đang chạy trên PR #3 và chỉ chạy trên `main` sau khi chủ repo merge. Kiểm tra lại ruleset trên GitHub khi đổi tên job hoặc workflow.
 
 ## Cài trên máy chủ Windows sau này
 

@@ -23,6 +23,20 @@ def create_app(database_path: Path | None = None) -> Flask:
         database.add_starter_sources(app.config["DATABASE_PATH"])
 
     @app.before_request
+    def block_during_deployment():
+        if request.path != "/healthz" and (app.config["DATABASE_PATH"].parent / "deployment-paused").exists():
+            return "Đang cập nhật, vui lòng thử lại sau.", 503
+
+    @app.get("/healthz")
+    def healthz():
+        connection = sqlite3.connect(app.config["DATABASE_PATH"])
+        try:
+            connection.execute("SELECT 1").fetchone()
+        finally:
+            connection.close()
+        return {"status": "ok"}
+
+    @app.before_request
     def protect_forms():
         token = session.setdefault("csrf_token", secrets.token_hex(24))
         if request.method == "POST" and not secrets.compare_digest(request.form.get("csrf_token", ""), token):

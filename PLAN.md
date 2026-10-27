@@ -4,6 +4,8 @@
 
 - [x] Chuẩn bị script CD cho server Windows: gate CI theo đúng SHA `main`, tạm dừng Hermes, sao lưu SQLite, kiểm tra dashboard, phục hồi khi lỗi; thêm hướng dẫn cài Scheduled Task tự kéo bản mới mỗi 5 phút. Chưa kích hoạt trên máy server.
 
+- [x] Đẩy nhánh CI/CD và mở PR #3; kiểm tra workflow Windows xanh trên PR, bật ruleset #25950396 để yêu cầu check `Python tests (Windows)` trước khi merge vào `main`.
+
 - [x] Tạo sandbox CI trên GitHub-hosted Windows runner để chạy test cho PR và `main`, dùng cấu hình giả và không bật tự động đăng.
 
 - [x] Khôi phục Hermes gateway và sửa script mở dịch vụ để bảo đảm 9Router sẵn sàng trước khi bật gateway, tránh trang Hermes báo không kết nối CLI sau khi đăng nhập.

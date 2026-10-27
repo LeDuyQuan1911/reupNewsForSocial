@@ -43,6 +43,15 @@ class DashboardTests(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
+    def test_deployment_pause_blocks_dashboard_but_allows_health_check(self):
+        marker = self.db_path.parent / "deployment-paused"
+        marker.touch()
+        self.assertEqual(self.client.get("/").status_code, 503)
+        self.assertEqual(self.client.post("/sources/scan").status_code, 503)
+        self.assertEqual(self.client.get("/healthz").status_code, 200)
+        marker.unlink()
+        self.assertEqual(self.client.get("/").status_code, 200)
+
     def attach_test_image(self, post_id):
         image_path = self.db_path.parent / "media" / f"post-{post_id}.jpg"
         image_path.parent.mkdir(exist_ok=True)

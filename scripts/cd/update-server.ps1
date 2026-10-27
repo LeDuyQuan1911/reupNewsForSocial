@@ -27,7 +27,7 @@ function Test-Dashboard {
         $listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($listener -and $listener.OwningProcess -eq $ExpectedPid) {
             try {
-                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5000/' -UseBasicParsing -TimeoutSec 3
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5000/healthz' -UseBasicParsing -TimeoutSec 3
                 if ($response.StatusCode -eq 200) { return $true }
             } catch { }
         }
@@ -96,6 +96,7 @@ if ($CheckOnly) { Write-Output "Ready to deploy $target"; exit 0 }
 $deployLock = $null
 $cycleLock = $null
 $jobPaused = $false
+$resumeAttempted = $false
 $switched = $false
 $pauseOwned = $false
 $dashboardWasRunning = $false
@@ -147,13 +148,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Isolated smoke check failed.' }
     Start-OwnedDashboard
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\hermes-automation-job.py') -Destination (Join-Path $env:LOCALAPPDATA 'hermes\scripts\reupnews-automation.py') -Force
+    $resumeAttempted = $true
     & $hermes cron resume $jobId | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not resume Hermes cron.' }
     $jobPaused = $false
-    Remove-Item -LiteralPath $pauseFile -Force
     Write-Output "Deployed $target; database backup: $backup"
+    Remove-Item -LiteralPath $pauseFile -Force
 } catch {
     $failure = $_
+    if ($resumeAttempted) {
+        try { & $hermes cron pause $jobId | Out-Null } catch { }
+        throw "Deployment reached Hermes resume; automatic DB rollback is disabled to protect post state. Maintenance remains active. Inspect manually: $failure"
+    }
     if ($switched) {
         try {
             Stop-OwnedDashboard
