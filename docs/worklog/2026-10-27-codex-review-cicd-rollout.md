@@ -18,4 +18,3 @@ Giữ report trong lượt độc lập và chỉ nêu lỗi có chuỗi điều
 
 ## Còn lại
 Chưa chạy workflow GitHub Actions hoặc updater/task scheduler trên server Windows thật; chưa thử Page/9Router. Cần tác giả xử lý phát hiện P1 và reviewer đối chiếu sau phản hồi.
-

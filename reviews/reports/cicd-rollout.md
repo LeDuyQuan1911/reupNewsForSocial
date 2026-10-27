@@ -31,4 +31,3 @@ Chưa thực hiện.
 ## Kết luận cho chủ repo
 
 Một rủi ro P1 còn lại: rollback sau khi dashboard mới mở có thể xóa dấu vết bài vừa đăng và cho phép đăng trùng. Cần xử lý trước khi cho updater tự chạy trên server. Reviewer không quyết định merge.
-
