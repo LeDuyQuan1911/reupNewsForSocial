@@ -5,21 +5,22 @@
   <section class="panel account-automation" aria-labelledby="automation-title">
     <div class="section-heading"><h2 id="automation-title">Tự động hóa</h2><span class="connection-state {{ 'ready' if automation_enabled else '' }}">{{ 'Đã bật' if automation_enabled else 'Đang tắt' }}</span></div>
     <div class="account-automation-body">
-      <p>Hệ thống tìm tin mỗi giờ, chuẩn bị tối đa 6 bài mỗi ngày và kiểm duyệt nội dung cùng ảnh. Khi đã cấu hình Facebook Page, bài đạt yêu cầu được xếp vào các giờ 07, 10, 13, 16, 19 và 22 (Bangkok).</p>
+      <p>{{ 'Hermes quản lý lịch chạy tự động.' if hermes_owner else 'Dashboard quản lý lịch chạy tự động.' }} Hệ thống tìm báo và repo một lần mỗi ngày theo giờ Bangkok, chuẩn bị tối đa {{ posting_settings.posts_per_day }} bài tự động và kiểm duyệt nội dung cùng ảnh. Khi đã cấu hình Facebook Page, bài đạt yêu cầu được xếp vào các giờ bạn chọn.</p>
+      {% if hermes_owner %}<p>Lượt Hermes gần nhất: {{ hermes_cycle.at|bangkok_time if hermes_cycle and hermes_cycle.at else 'Chưa ghi nhận' }}{% if hermes_cycle and hermes_cycle.status == 'failed' %} · Cần xem lỗi trong Hermes cron{% endif %}</p>{% endif %}
       <dl class="account-metrics">
         <div><dt>Sẵn sàng chờ lịch</dt><dd>{{ automation_status.counts.get('ready', 0) }}</dd></div>
         <div><dt>Đã lên lịch</dt><dd>{{ automation_status.counts.get('scheduled', 0) }}</dd></div>
         <div><dt>Cần xem lỗi</dt><dd>{{ automation_status.counts.get('failed', 0) }}</dd></div>
         <div><dt>Bị chặn</dt><dd>{{ automation_status.counts.get('blocked', 0) }}</dd></div>
       </dl>
-      <div class="account-scan"><span>Quét gần nhất: {{ automation_status.last_scan_at|bangkok_time if automation_status.last_scan_at else 'Chưa quét tự động' }}</span><a class="source-link" href="{{ url_for('posts_page', view='action') }}">Xem bài cần xử lý</a></div>
+      <div class="account-scan"><span>Quét tự động gần nhất: {{ automation_status.last_scan_at|bangkok_time if automation_status.last_scan_at else 'Chưa quét tự động' }}</span><a class="source-link" href="{{ url_for('hermes_page') }}">Điều khiển Hermes →</a></div>
     </div>
   </section>
 
   <section class="panel account-connections" aria-labelledby="connections-title">
     <div class="section-heading"><h2 id="connections-title">Kết nối và kênh đăng</h2></div>
-    <div class="connection-row"><div><h3>Facebook Page</h3><p>Đăng hoặc lên lịch sau khi nội dung và ảnh được duyệt. Cần Page ID, Page access token và phiên bản Graph API. <a href="{{ url_for('facebook_page') }}">Xem cách kết nối Page</a>.</p></div><span class="connection-state {{ 'ready' if connections.page else '' }}">{{ 'Đủ thông số' if connections.page else 'Chưa đủ thông số' }}</span></div>
-    <div class="connection-row"><div><h3>AI viết bài</h3><p>Viết bản nháp từ tiêu đề, tóm tắt và liên kết nguồn qua 9Router hoặc endpoint tương thích.</p></div><span class="connection-state {{ 'ready' if connections.llm else '' }}">{{ 'Đã cấu hình' if connections.llm else 'Chưa cấu hình' }}</span></div>
+    <div class="connection-row"><div><h3>Facebook Page</h3><p>Đăng hoặc lên lịch sau khi nội dung và ảnh được duyệt. Nguồn xác thực: {{ 'System User' if facebook_auth_mode == 'system_user' else 'Page token cá nhân' }}. <a href="{{ url_for('facebook_page') }}">Xem cách kết nối Page</a>.</p></div><span class="connection-state {{ 'ready' if connections.page else '' }}">{{ 'Đủ thông số' if connections.page else 'Chưa đủ thông số' }}</span></div>
+    <div class="connection-row"><div><h3>Hermes viết bài</h3><p>Hermes đọc hướng dẫn biên tập và dữ kiện nguồn, rồi viết bản nháp qua model 9Router đã cấu hình.</p></div><span class="connection-state {{ 'ready' if connections.llm else '' }}">{{ 'Đã cấu hình model' if connections.llm else 'Chưa cấu hình' }}</span></div>
     <div class="connection-row"><div><h3>AI duyệt ảnh</h3><p>Kiểm tra nội dung và ảnh trước khi gửi. Model được chọn phải hỗ trợ ảnh.</p></div><span class="connection-state {{ 'ready' if connections.vision else '' }}">{{ 'Đã cấu hình' if connections.vision else 'Chưa cấu hình riêng' }}</span></div>
     <div class="connection-row"><div><h3>AI tạo ảnh</h3><p>Khi bài gốc và repo không có ảnh dùng được, gọi model tạo ảnh qua 9Router cục bộ. Model viết bài hoặc xem ảnh không tự tạo ảnh.</p></div><span class="connection-state {{ 'ready' if connections.image else '' }}">{{ 'Đã cấu hình' if connections.image else 'Chưa cấu hình model ảnh' }}</span></div>
     <div class="connection-row"><div><h3>Trang cá nhân và nhóm</h3><p>Chưa hỗ trợ đăng tự động lên các đích này.</p></div><span class="connection-state">Chưa tích hợp</span></div>

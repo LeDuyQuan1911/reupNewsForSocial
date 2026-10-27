@@ -1,6 +1,15 @@
 .facebook-page-setup { margin-bottom: 17px; }
 .facebook-page-setup .section-heading h1 { font-size: 23px; }
 .facebook-page-content { padding: 20px 23px 21px; }
+.facebook-connected { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 15px; padding: 19px 20px; border: 1px solid #cbdce9; border-radius: 7px; background: #f5f9fc; }
+.facebook-connected > div { min-width: 0; }
+.facebook-connected-label { color: #42647b; font-size: 11px; font-weight: 750; letter-spacing: .08em; }
+.facebook-connected h2 { margin: 5px 0 3px; color: var(--ink); font-size: 21px; overflow-wrap: anywhere; }
+.facebook-connected p { margin: 3px 0 0; color: var(--muted-ink); font-size: 12px; line-height: 1.5; }
+.facebook-connected .button-link { flex: none; }
+.facebook-setup-details { margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--line); }
+.facebook-setup-details summary { color: var(--blue); cursor: pointer; font-weight: 700; }
+.facebook-setup-details ol { margin-top: 15px; }
 .facebook-page-content > p { max-width: 850px; margin: 0 0 14px; color: var(--muted-ink); line-height: 1.55; }
 .facebook-page-content ol { display: grid; gap: 9px; max-width: 900px; margin: 0 0 16px; padding-left: 22px; line-height: 1.55; }
 .facebook-page-content li { padding-left: 5px; }
@@ -44,4 +53,4 @@
 .facebook-add p, .facebook-page-status p { margin: 4px 0 8px; color: var(--muted-ink); font-size: 12px; line-height: 1.55; }
 .facebook-add button { justify-self: start; }
 @media (max-width: 960px) { .facebook-layout { grid-template-columns: 1fr; } .facebook-side { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 700px) { .facebook-side { grid-template-columns: 1fr; } .facebook-group { align-items: flex-start; flex-direction: column; } .facebook-group-actions { width: 100%; } .facebook-caution { margin: 16px 17px 3px; } .facebook-group-list { padding: 0 17px; } .facebook-page-content { padding: 18px; } .facebook-page-setup .section-heading { flex-wrap: wrap; } }
+@media (max-width: 700px) { .facebook-side { grid-template-columns: 1fr; } .facebook-group { align-items: flex-start; flex-direction: column; } .facebook-group-actions { width: 100%; } .facebook-caution { margin: 16px 17px 3px; } .facebook-group-list { padding: 0 17px; } .facebook-page-content { padding: 18px; } .facebook-page-setup .section-heading { flex-wrap: wrap; } .facebook-connected { align-items: flex-start; flex-direction: column; padding: 16px; } }

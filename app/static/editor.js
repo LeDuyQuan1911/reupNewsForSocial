@@ -13,8 +13,8 @@ if (bodyField) {
   generateForm?.addEventListener('submit', (event) => {
     const changed = bodyField.value !== originalBody;
     const message = changed
-      ? 'Bạn có thay đổi chưa lưu. Viết lại bằng AI sẽ thay thế bản nháp đã lưu. Tiếp tục?'
-      : 'Viết lại bằng AI sẽ thay thế nội dung bản nháp hiện tại. Tiếp tục?';
+      ? 'Bạn có thay đổi chưa lưu. Hermes viết lại sẽ thay thế bản nháp đã lưu. Tiếp tục?'
+      : 'Hermes viết lại sẽ thay thế nội dung bản nháp hiện tại. Tiếp tục?';
     if (bodyField.value.trim() && !window.confirm(message)) {
       event.preventDefault();
       return;

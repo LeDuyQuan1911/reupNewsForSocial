@@ -2,13 +2,49 @@
 
 ## Đã xong
 
+- [x] Chuẩn bị script CD cho server Windows: gate CI theo đúng SHA `main`, tạm dừng Hermes, sao lưu SQLite, kiểm tra dashboard, phục hồi khi lỗi; thêm hướng dẫn cài Scheduled Task tự kéo bản mới mỗi 5 phút. Chưa kích hoạt trên máy server.
+
+- [x] Tạo sandbox CI trên GitHub-hosted Windows runner để chạy test cho PR và `main`, dùng cấu hình giả và không bật tự động đăng.
+
+- [x] Khôi phục Hermes gateway và sửa script mở dịch vụ để bảo đảm 9Router sẵn sàng trước khi bật gateway, tránh trang Hermes báo không kết nối CLI sau khi đăng nhập.
+
+- [x] Gắn lượt Hermes tìm nguồn của ngày mới với 00:00 Bangkok, chạy bù khi lỡ nửa đêm và dùng số bài/ngày làm mục tiêu chọn tin.
+
+- [x] Tự bổ sung ảnh thứ hai qua model ảnh 9Router khi nguồn chỉ có một ảnh hoặc không có ảnh thật; thử làm giàu bản nháp cũ khi chuẩn bị đăng, không bắt người dùng tải ảnh thủ công.
+
+- [x] Ưu tiên tối đa ba ảnh thật khác nhau khi tạo bản nháp; bỏ ảnh nguồn bị model từ chối trong luồng tự động nếu vẫn còn ảnh đạt, và không đăng ảnh thẻ tiêu đề tạm kèm ảnh thật.
+
+- [x] Cho bài đăng chọn nhiều ảnh trong một lần tải lên, gợi Hermes dùng nhiều icon phù hợp và chuẩn bị ít nhất một bình luận có thể sửa; gửi bình luận sau khi bài Page được xác nhận, đối chiếu khi kết quả không rõ.
+
+- [x] Cho dashboard và Hermes dùng System User token để lấy Page token của đúng Page khi đăng, giữ đường Page token cũ nhưng không dùng làm dự phòng trong chế độ System User.
+
+- [x] Chẩn đoán token Page hiện tại qua lỗi Graph API 190/463 và hiển thị nguyên nhân hết hạn trên trang Facebook.
+
+- [x] Hiển thị Page đang cấu hình trên trang Facebook, xác minh tên/ID qua Meta Graph API mà không lộ token.
+
+- [x] Tăng tốc mở trang Hermes bằng cách tải trạng thái CLI riêng sau khi hiện giao diện và đọc các trạng thái cron song song.
+
+- [x] Thay ô nhập chuỗi giờ đăng bằng từng ô chọn giờ dạng đồng hồ, tự cập nhật số ô theo số bài/ngày.
+
+- [x] Thêm trang điều khiển Hermes: xem gateway/job/lượt chạy, chạy một lượt, tạm dừng/tiếp tục đúng job của repo, đặt lịch và quét nguồn thủ công.
+
+- [x] Cho đặt số bài và giờ đăng theo ngày Bangkok trong trang Hermes; Hermes quét nguồn tự động một lần/ngày, còn nút quét báo/repo vẫn dùng được theo yêu cầu.
+
+- [x] Chuyển nhịp tự động từ thread dashboard sang Hermes cron mỗi phút; cài gateway tự khởi động, runner dùng biến môi trường User và giữ các cổng an toàn trước khi đăng Page.
+
+- [x] Nối thao tác viết lại và bước tự tạo nháp với Hermes CLI; truyền brief biên tập và dữ kiện nguồn trong mỗi lượt, giữ bản nháp cũ nếu Hermes lỗi.
+
+- [x] Bảo đảm bản nháp mới có ít nhất một icon có ý nghĩa do LLM chọn; thử viết lại một lần khi thiếu, cấu hình Hermes qua 9Router và nạp yêu cầu biên tập từ `AGENTS.md` khi mở trong repo.
+
+- [x] Dùng trích đoạn bài gốc/README GitHub khi viết bản nháp mới; ưu tiên ảnh demo/screenshot từ README và dùng metadata khi trang nguồn không đọc được.
+
 - [x] Nối lập dàn ý và sinh ảnh dự phòng với model văn bản/ảnh trên 9Router localhost; cấu hình model ảnh riêng, thử tạo ảnh thật và thay ảnh bản nháp #1 bằng kết quả 9Router.
 
 - [x] Thay ảnh AI trừu tượng của bản nháp OpenAI–NASK bằng ảnh có tên hai tổ chức và ba bước nghiên cứu nhìn thấy ngay; ghi tiêu chí điểm nhấn cho ảnh tạo mới.
 
 - [x] Ưu tiên ảnh thật trong bài báo hoặc README repo, thử ảnh khác khi ảnh đầu không dùng được, rồi mới chụp repo; bổ sung kiểm tra mức độ liên quan của ảnh trước khi đăng.
 
-- [x] Bỏ quy tắc icon đầu mỗi dòng và phần tự chèn icon; để LLM chọn cách dùng phù hợp từng bài.
+- [x] Bỏ quy tắc icon đầu mỗi dòng và phần tự chèn icon; để LLM chọn số lượng và vị trí phù hợp từng bài.
 
 - [x] Thay ảnh thẻ chữ của bản nháp OpenAI–NASK bằng ảnh minh họa AI; chặn tự lên lịch và gửi bài chỉ có ảnh thẻ tạm.
 
@@ -69,6 +105,8 @@
 - [ ] Bổ sung nhận diện trùng nội dung khi tiêu đề khác nhau.
 - [ ] Nâng bước đánh giá metadata thành nghiên cứu có kiểm chứng toàn văn và độ tin cậy nguồn.
 - [ ] Kiểm tra viết bài và kiểm duyệt với 9Router/model thật; chọn giọng văn và ngôn ngữ đầu ra.
+- [x] Tạo System User quyền Employee trong Business Settings, gán App CreatePost và Page Duy Quân AppleWatch với quyền nội dung/bình luận, tạo token 60 ngày và xác minh đúng Page trên máy này.
+
 - [ ] Kiểm tra đăng thật lên Facebook Page bằng quyền và token của chủ dự án.
 - [ ] Kiểm chứng giải pháp đăng tự động lên trang cá nhân và nhóm bằng phiên trình duyệt của chủ dự án.
 - [ ] Build runtime vendored và bật Git hook cục bộ khi quyền cho phép; kiểm tra một commit thực tế.

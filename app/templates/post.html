@@ -18,7 +18,7 @@
     <section class="panel editor-panel" aria-labelledby="content-title">
       <div class="section-heading"><h2 id="content-title">Nội dung bài đăng</h2></div>
       {% if post.status in ['draft','blocked','failed'] %}
-      <p class="section-description">Viết lại tin bằng giọng của bạn hoặc dùng AI để tạo bản nháp. Đọc lại trước khi lên lịch.</p>
+      <p class="section-description">Viết lại tin bằng giọng của bạn hoặc để Hermes tạo bản nháp với các icon phù hợp nội dung. Hermes chọn số lượng và vị trí icon theo từng bài. Đọc lại trước khi lên lịch.</p>
       <form action="{{ url_for('save_post', post_id=post.id) }}" method="post" class="editor-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label for="post-body">Nội dung đăng Facebook</label>
@@ -27,11 +27,37 @@
       </form>
       <form action="{{ url_for('generate_post', post_id=post.id) }}" method="post" class="generate-form" id="generate-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="secondary" type="submit">Viết lại bằng AI ↗</button>
+        <button class="secondary" type="submit">Hermes viết lại ↗</button>
       </form>
       {% else %}
       <p class="section-description">Nội dung sẽ hiển thị như dưới đây khi đăng. Hủy lịch nếu bạn muốn chỉnh sửa.</p>
       <div class="post-preview" aria-label="Nội dung bài đăng">{{ post.body }}</div>
+      {% endif %}
+    </section>
+    <section class="panel editor-panel" aria-labelledby="comment-title">
+      <div class="section-heading"><h2 id="comment-title">Bình luận đầu tiên</h2></div>
+      <p class="section-description">Bình luận này được gửi sau khi Facebook xác nhận bài đã đăng. Bạn có thể sửa nội dung cho phù hợp; bài đăng thật cần ít nhất một bình luận.</p>
+      {% if post.status in ['draft','blocked','failed'] %}
+      <form action="{{ url_for('save_first_comment', post_id=post.id) }}" method="post" class="editor-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="first-comment-body">Nội dung bình luận</label>
+        <textarea id="first-comment-body" name="first_comment_body" rows="4" maxlength="2000" required>{{ post.first_comment_body }}</textarea>
+        <button class="secondary" type="submit">Lưu bình luận</button>
+      </form>
+      {% else %}
+      <div class="post-preview" aria-label="Bình luận đầu tiên">{{ post.first_comment_body or 'Chưa có bình luận' }}</div>
+      {% if post.status == 'published' %}
+        {% if post.first_comment_status == 'posted' %}<p class="section-description">Đã gửi bình luận đầu tiên.</p>
+        {% elif post.first_comment_status in ['sending','uncertain'] %}
+          <p class="last-error">Chưa xác nhận được bình luận. Hãy kiểm tra bài trên Page để tránh gửi trùng.</p>
+          <form action="{{ url_for('resolve_first_comment', post_id=post.id) }}" method="post" class="schedule-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label><input name="checked_page" type="checkbox" value="yes" required> Tôi đã kiểm tra bình luận trên Page</label>
+            <button class="secondary" name="outcome" value="posted" type="submit">Bình luận đã có</button>
+            <button class="secondary" name="outcome" value="absent" type="submit">Chưa có, gửi bình luận</button>
+          </form>
+        {% elif post.first_comment_status == 'pending' %}<p class="section-description">Đang chờ gửi bình luận.</p>{% endif %}
+      {% endif %}
       {% endif %}
     </section>
     <section class="panel editor-panel" aria-labelledby="video-title">
@@ -60,6 +86,7 @@
     </section>
     <section class="panel editor-panel" aria-labelledby="images-title">
       <div class="section-heading"><h2 id="images-title">Ảnh của bài đăng <span class="section-count">{{ images|length }}/10</span></h2></div>
+      <p class="section-description">Hệ thống tự tìm nhiều ảnh từ bài gốc hoặc repo; khi nguồn thiếu ảnh, hệ thống thử tạo ảnh bổ sung liên quan qua 9Router. Bạn không cần tự thêm ảnh.</p>
       <div class="image-panel">
         {% if not has_image %}<p class="image-empty">Bài cần ít nhất một ảnh hợp lệ trước khi lên lịch hoặc đăng.</p>{% endif %}
         {% if images %}<div class="post-image-grid">
@@ -77,8 +104,8 @@
           </form>
           <form action="{{ url_for('upload_post_image', post_id=post.id) }}" method="post" enctype="multipart/form-data" class="image-upload">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label for="upload-image">Hoặc chọn ảnh từ máy · JPEG, PNG, WebP · tối đa 8 MB</label>
-            <input id="upload-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+            <label for="upload-image">Hoặc chọn nhiều ảnh từ máy · JPEG, PNG, WebP · tối đa 8 MB mỗi ảnh</label>
+            <input id="upload-image" name="images" type="file" accept="image/jpeg,image/png,image/webp" multiple required>
             <button class="secondary" type="submit">Tải ảnh lên</button>
           </form>
         </div>
@@ -112,7 +139,7 @@
             <button class="secondary" type="submit">Hủy lịch để sửa bài</button>
           </form>
           {% else %}
-          <p class="muted">Cần nội dung và ít nhất một ảnh. Hệ thống kiểm duyệt trước khi gửi.</p>
+          <p class="muted">Cần nội dung, ít nhất một ảnh và một bình luận. Hệ thống kiểm duyệt trước khi gửi.</p>
           <form action="{{ url_for('schedule_post', post_id=post.id) }}" method="post" class="schedule-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label for="scheduled-at">Giờ đăng (Asia/Bangkok)</label>

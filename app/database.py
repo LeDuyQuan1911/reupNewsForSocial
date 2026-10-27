@@ -1,6 +1,8 @@
 import sqlite3
+import json
+import re
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -55,6 +57,10 @@ CREATE TABLE IF NOT EXISTS posts (
     video_comment_status TEXT NOT NULL DEFAULT '',
     video_comment_id TEXT,
     video_comment_error TEXT,
+    first_comment_body TEXT NOT NULL DEFAULT '',
+    first_comment_status TEXT NOT NULL DEFAULT '',
+    first_comment_id TEXT,
+    first_comment_error TEXT,
     image_file TEXT,
     image_source_url TEXT,
     image_kind TEXT,
@@ -77,6 +83,16 @@ CREATE TABLE IF NOT EXISTS automation_state (
     baseline_article_id INTEGER NOT NULL,
     last_scan_at TEXT
 );
+CREATE TABLE IF NOT EXISTS automation_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    posts_per_day INTEGER NOT NULL CHECK (posts_per_day BETWEEN 1 AND 24),
+    posting_times TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS automation_settings_history (
+    id INTEGER PRIMARY KEY,
+    changed_at TEXT NOT NULL,
+    posts_per_day INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS automation_jobs (
     article_id INTEGER PRIMARY KEY REFERENCES articles(id),
     post_id INTEGER REFERENCES posts(id),
@@ -98,6 +114,8 @@ STARTER_SOURCES = (
     ("AWS Machine Learning Blog", "https://aws.amazon.com/blogs/machine-learning/feed/", "rss"),
     ("Microsoft Research", "https://www.microsoft.com/en-us/research/feed/", "rss"),
 )
+
+DEFAULT_POSTING_TIMES = ("07:00", "10:00", "13:00", "16:00", "19:00", "22:00")
 
 
 @contextmanager
@@ -147,9 +165,16 @@ def initialize(path: Path) -> None:
             ("video_comment_status", "TEXT NOT NULL DEFAULT ''"),
             ("video_comment_id", "TEXT"),
             ("video_comment_error", "TEXT"),
+            ("first_comment_body", "TEXT NOT NULL DEFAULT ''"),
+            ("first_comment_status", "TEXT NOT NULL DEFAULT ''"),
+            ("first_comment_id", "TEXT"),
+            ("first_comment_error", "TEXT"),
         ):
             if name not in post_columns:
                 db.execute(f"ALTER TABLE posts ADD COLUMN {name} {definition}")
+        db.execute("""UPDATE posts SET first_comment_body = '🔎 Đọc thêm tại nguồn: ' ||
+                   (SELECT url FROM articles WHERE articles.id = posts.article_id)
+                   WHERE first_comment_body = '' AND status IN ('draft', 'blocked', 'failed', 'scheduled')""")
         if not had_post_images:
             db.execute("""INSERT INTO post_images (post_id, image_file, source_url, kind, sort_order)
                           SELECT id, image_file, COALESCE(image_source_url, ''),
@@ -160,6 +185,58 @@ def initialize(path: Path) -> None:
             db.execute("ALTER TABLE automation_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1")
         if "last_attempt_at" not in job_columns:
             db.execute("ALTER TABLE automation_jobs ADD COLUMN last_attempt_at TEXT")
+        db.execute(
+            "INSERT OR IGNORE INTO automation_settings (id, posts_per_day, posting_times) VALUES (1, ?, ?)",
+            (len(DEFAULT_POSTING_TIMES), json.dumps(DEFAULT_POSTING_TIMES)),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO automation_settings_history (id, changed_at, posts_per_day) VALUES (1, ?, ?)",
+            ("1970-01-01T00:00:00+00:00", len(DEFAULT_POSTING_TIMES)),
+        )
+
+
+def get_posting_settings(path: Path) -> dict:
+    with connect(path) as db:
+        row = db.execute("SELECT posts_per_day, posting_times FROM automation_settings WHERE id = 1").fetchone()
+    if row is None:
+        return {"posts_per_day": len(DEFAULT_POSTING_TIMES), "times": DEFAULT_POSTING_TIMES}
+    return {"posts_per_day": row["posts_per_day"], "times": tuple(json.loads(row["posting_times"]))}
+
+
+def save_posting_settings(path: Path, count_value: str, times_value: str) -> dict:
+    if not re.fullmatch(r"\d{1,2}", count_value.strip()):
+        raise ValueError("Số bài mỗi ngày phải từ 1 đến 24")
+    count = int(count_value)
+    if not 1 <= count <= 24:
+        raise ValueError("Số bài mỗi ngày phải từ 1 đến 24")
+    pieces = [piece for piece in re.split(r"[,;\s]+", times_value.strip()) if piece]
+    if len(pieces) != count:
+        raise ValueError(f"Cần nhập đúng {count} khung giờ, mỗi giờ cho một bài")
+    minutes = []
+    for piece in pieces:
+        if not re.fullmatch(r"\d{1,2}:\d{2}", piece):
+            raise ValueError("Giờ đăng phải có dạng HH:MM, ví dụ 07:00")
+        hour, minute = map(int, piece.split(":"))
+        if hour > 23 or minute > 59:
+            raise ValueError("Giờ đăng phải nằm trong ngày 00:00–23:59")
+        minutes.append(hour * 60 + minute)
+    minutes.sort()
+    gaps = [right - left for left, right in zip(minutes, minutes[1:])]
+    gaps.append(minutes[0] + 1440 - minutes[-1])
+    if min(gaps) < 30:
+        raise ValueError("Các giờ đăng cần cách nhau ít nhất 30 phút")
+    times = tuple(f"{value // 60:02d}:{value % 60:02d}" for value in minutes)
+    with connect(path) as db:
+        db.execute(
+            "INSERT INTO automation_settings (id, posts_per_day, posting_times) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET posts_per_day = excluded.posts_per_day, posting_times = excluded.posting_times",
+            (count, json.dumps(times)),
+        )
+        db.execute(
+            "INSERT INTO automation_settings_history (changed_at, posts_per_day) VALUES (?, ?)",
+            (datetime.now(timezone.utc).isoformat(), count),
+        )
+    return {"posts_per_day": count, "times": times}
 
 
 def add_source(path: Path, name: str, url: str) -> None:
@@ -368,6 +445,7 @@ def daily_activity(path: Path, days: int = 7, now: datetime | None = None) -> li
             "discovered": 0,
             "created": 0,
             "automatic": 0,
+            "target": len(DEFAULT_POSTING_TIMES),
             "published": 0,
         }
         for offset in range(days)
@@ -379,6 +457,15 @@ def daily_activity(path: Path, days: int = 7, now: datetime | None = None) -> li
         ("posts", "published_at", "published", "AND status = 'published'"),
     )
     with connect(path) as db:
+        history = [
+            (datetime.fromisoformat(item["changed_at"]), item["posts_per_day"])
+            for item in db.execute("SELECT changed_at, posts_per_day FROM automation_settings_history ORDER BY changed_at")
+        ]
+        for item in rows.values():
+            local_day = datetime.fromisoformat(item["day"]).date()
+            day_end = datetime.combine(local_day + timedelta(days=1), time.min, ZoneInfo("Asia/Bangkok")).astimezone(timezone.utc)
+            item["target"] = next((count for changed_at, count in reversed(history) if changed_at < day_end),
+                                  len(DEFAULT_POSTING_TIMES))
         for table, column, key, condition in metrics:
             for result in db.execute(
                 f"""SELECT date({column}, '+7 hours') AS day, COUNT(*) AS total
@@ -425,7 +512,8 @@ def make_draft(path: Path, article_id: int) -> int:
         if article is None:
             raise ValueError("Bài gốc không tồn tại")
         body = f"{article['title']}\n\nNguồn: {article['url']}"
-        db.execute("INSERT OR IGNORE INTO posts (article_id, body) VALUES (?, ?)", (article_id, body))
+        db.execute("INSERT OR IGNORE INTO posts (article_id, body, first_comment_body) VALUES (?, ?, ?)",
+                   (article_id, body, f"🔎 Đọc thêm tại nguồn: {article['url']}"))
         return db.execute("SELECT id FROM posts WHERE article_id = ?", (article_id,)).fetchone()["id"]
 
 
@@ -436,7 +524,8 @@ def make_automation_draft(path: Path, article_id: int) -> int:
             raise ValueError("Bài gốc không tồn tại")
         body = f"{article['title']}\n\nNguồn: {article['url']}"
         cursor = db.execute(
-            "INSERT OR IGNORE INTO posts (article_id, body) VALUES (?, ?)", (article_id, body)
+            "INSERT OR IGNORE INTO posts (article_id, body, first_comment_body) VALUES (?, ?, ?)",
+            (article_id, body, f"🔎 Đọc thêm tại nguồn: {article['url']}")
         )
         if cursor.rowcount != 1:
             raise ValueError("Bài đã được tạo thủ công")
@@ -462,7 +551,8 @@ def post_filter(view: str, search: str) -> tuple[str, list]:
         clause = f"posts.status IN ({','.join('?' for _ in statuses)})"
         if view == "action":
             clause = (f"({clause} OR (posts.status = 'publishing' AND posts.publishing_started_at <= ?) "
-                      "OR (posts.status = 'published' AND posts.video_comment_status IN ('sending', 'uncertain')))")
+                      "OR (posts.status = 'published' AND (posts.video_comment_status IN ('sending', 'uncertain') "
+                      "OR posts.first_comment_status IN ('sending', 'uncertain'))))")
         filters.append(clause)
         parameters.extend(statuses)
         if view == "action":
@@ -610,6 +700,19 @@ def update_draft(path: Path, post_id: int, body: str) -> None:
             raise ValueError("Không thể sửa bài đã lên lịch hoặc đã đăng")
 
 
+def set_first_comment(path: Path, post_id: int, body: str) -> None:
+    body = body.strip()
+    if not 1 <= len(body) <= 2000:
+        raise ValueError("Bình luận đầu tiên phải có nội dung và không quá 2.000 ký tự")
+    with connect(path) as db:
+        changed = db.execute(
+            "UPDATE posts SET first_comment_body = ? WHERE id = ? AND status IN ('draft', 'blocked', 'failed')",
+            (body, post_id),
+        ).rowcount
+        if not changed:
+            raise ValueError("Chỉ có thể sửa bình luận của bản nháp")
+
+
 def set_post_video(path: Path, post_id: int, video_url: str) -> None:
     from .video import with_video_notice
     with connect(path) as db:
@@ -625,6 +728,10 @@ def schedule_post(path: Path, post_id: int, scheduled_at: str, test_only: bool =
     with connect(path) as db:
         if not db.execute("SELECT 1 FROM post_images WHERE post_id = ? LIMIT 1", (post_id,)).fetchone():
             raise ValueError("Bài đăng phải có ít nhất một ảnh trước khi lên lịch")
+        if not test_only and not db.execute(
+            "SELECT 1 FROM posts WHERE id = ? AND TRIM(first_comment_body) != ''", (post_id,)
+        ).fetchone():
+            raise ValueError("Bài đăng thật cần ít nhất một bình luận")
         changed = db.execute(
             "UPDATE posts SET status = 'scheduled', scheduled_at = ?, test_only = ?, last_error = NULL WHERE id = ? AND status IN ('draft', 'blocked', 'failed')",
             (scheduled_at, int(test_only), post_id),
@@ -648,6 +755,7 @@ def claim_post(path: Path, post_id: int) -> bool:
         return bool(db.execute(
             """UPDATE posts SET status = 'publishing', publishing_started_at = ? WHERE id = ? AND
                status IN ('draft', 'scheduled', 'blocked', 'failed') AND test_only = 0
+               AND TRIM(first_comment_body) != ''
                AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)""",
             (datetime.now(timezone.utc).isoformat(), post_id,),
         ).rowcount)
@@ -657,6 +765,7 @@ def claim_due_posts(path: Path, now_iso: str) -> list[int]:
     with connect(path) as db:
         ids = [row["id"] for row in db.execute(
             """SELECT id FROM posts WHERE status = 'scheduled' AND test_only = 0 AND scheduled_at <= ?
+               AND TRIM(first_comment_body) != ''
                AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)
                ORDER BY scheduled_at LIMIT 20""",
             (now_iso,),
@@ -665,6 +774,7 @@ def claim_due_posts(path: Path, now_iso: str) -> list[int]:
         for post_id in ids:
             if db.execute("""UPDATE posts SET status = 'publishing', publishing_started_at = ?
                              WHERE id = ? AND status = 'scheduled' AND test_only = 0
+                             AND TRIM(first_comment_body) != ''
                              AND EXISTS (SELECT 1 FROM post_images WHERE post_images.post_id = posts.id)""",
                           (now_iso, post_id,)).rowcount:
                 claimed.append(post_id)
@@ -678,10 +788,49 @@ def finish_post(path: Path, post_id: int, status: str, error: str | None = None,
         db.execute(
             """UPDATE posts SET status = ?, last_error = ?, platform_post_id = ?, published_at = ?,
                       publishing_started_at = NULL,
+                      first_comment_status = CASE WHEN ? = 'published' AND TRIM(first_comment_body) != ''
+                                                  THEN 'pending' ELSE first_comment_status END,
                       video_comment_status = CASE WHEN ? = 'published' AND video_url != '' THEN 'pending' ELSE video_comment_status END
                WHERE id = ? AND status = 'publishing'""",
-            (status, error, platform_post_id, published_at, status, post_id),
+            (status, error, platform_post_id, published_at, status, status, post_id),
         )
+
+
+def pending_first_comment_ids(path: Path) -> list[int]:
+    with connect(path) as db:
+        return [row["id"] for row in db.execute(
+            "SELECT id FROM posts WHERE status = 'published' AND first_comment_status = 'pending' "
+            "AND platform_post_id IS NOT NULL ORDER BY published_at LIMIT 20")]
+
+
+def claim_first_comment(path: Path, post_id: int):
+    with connect(path) as db:
+        changed = db.execute(
+            "UPDATE posts SET first_comment_status = 'sending' WHERE id = ? AND status = 'published' "
+            "AND first_comment_status = 'pending' AND platform_post_id IS NOT NULL", (post_id,)
+        ).rowcount
+        if changed:
+            return db.execute("SELECT platform_post_id, first_comment_body FROM posts WHERE id = ?", (post_id,)).fetchone()
+    return None
+
+
+def finish_first_comment(path: Path, post_id: int, comment_id: str | None = None, error: str | None = None) -> None:
+    with connect(path) as db:
+        db.execute("UPDATE posts SET first_comment_status = ?, first_comment_id = ?, first_comment_error = ? "
+                   "WHERE id = ? AND status = 'published' AND first_comment_status = 'sending'",
+                   ("posted" if comment_id else "uncertain", comment_id, error, post_id))
+
+
+def resolve_first_comment(path: Path, post_id: int, already_posted: bool) -> None:
+    with connect(path) as db:
+        changed = db.execute(
+            "UPDATE posts SET first_comment_status = ?, first_comment_error = NULL WHERE id = ? "
+            "AND status = 'published' AND first_comment_status IN ('sending', 'uncertain') "
+            "AND platform_post_id IS NOT NULL AND TRIM(first_comment_body) != ''",
+            ("posted" if already_posted else "pending", post_id),
+        ).rowcount
+        if not changed:
+            raise ValueError("Bình luận không ở trạng thái cần đối chiếu")
 
 
 def pending_video_comment_ids(path: Path) -> list[int]:
@@ -759,6 +908,18 @@ def claim_automation_scan(path: Path, now_iso: str, interval_seconds: int) -> bo
         )
         last = db.execute("SELECT last_scan_at FROM automation_state WHERE id = 1").fetchone()["last_scan_at"]
         if last and datetime.fromisoformat(last) + timedelta(seconds=interval_seconds) > datetime.fromisoformat(now_iso):
+            return False
+        db.execute("UPDATE automation_state SET last_scan_at = ? WHERE id = 1", (now_iso,))
+        return True
+
+
+def claim_daily_automation_scan(path: Path, now_iso: str) -> bool:
+    """Claim one automatic source search per Bangkok calendar day."""
+    current_day = datetime.fromisoformat(now_iso).astimezone(ZoneInfo("Asia/Bangkok")).date()
+    with connect(path) as db:
+        db.execute("INSERT OR IGNORE INTO automation_state (id, baseline_article_id) VALUES (1, 0)")
+        last = db.execute("SELECT last_scan_at FROM automation_state WHERE id = 1").fetchone()["last_scan_at"]
+        if last and datetime.fromisoformat(last).astimezone(ZoneInfo("Asia/Bangkok")).date() >= current_day:
             return False
         db.execute("UPDATE automation_state SET last_scan_at = ? WHERE id = 1", (now_iso,))
         return True

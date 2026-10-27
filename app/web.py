@@ -1,13 +1,14 @@
 import os
+import json
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 
-from . import automation, database, discovery, facebook_groups, feeds, llm, media, queue, video
+from . import automation, database, discovery, facebook, facebook_groups, feeds, hermes_control, llm, media, queue, video
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -48,6 +49,7 @@ def create_app(database_path: Path | None = None) -> Flask:
     @app.get("/")
     def dashboard():
         days = 30 if request.args.get("days") == "30" else 7
+        posting_settings = database.get_posting_settings(app.config["DATABASE_PATH"])
         activity = database.daily_activity(app.config["DATABASE_PATH"], days=days)
         chart_activity = list(reversed(activity[:7]))
         return render_template(
@@ -55,7 +57,8 @@ def create_app(database_path: Path | None = None) -> Flask:
             counts=database.overview_counts(app.config["DATABASE_PATH"]),
             activity=activity,
             chart_activity=chart_activity,
-            chart_max=max([6, *(item["created"] for item in chart_activity)]),
+            chart_max=max([posting_settings["posts_per_day"], *(item["created"] for item in chart_activity)]),
+            posting_settings=posting_settings,
             selected_days=days,
             automation_status=database.automation_status(app.config["DATABASE_PATH"]),
             automation_enabled=automation.enabled(),
@@ -147,15 +150,79 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.get("/account")
     def account_page():
+        data_dir = app.config["DATABASE_PATH"].parent
+        posting_settings = database.get_posting_settings(app.config["DATABASE_PATH"])
+        hermes_owner = (data_dir / "hermes-automation.enabled").exists()
+        hermes_cycle = None
+        if hermes_owner:
+            try:
+                hermes_cycle = json.loads((data_dir / "hermes-last-cycle.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
         return render_template("account.html", automation_status=database.automation_status(app.config["DATABASE_PATH"]),
-                               automation_enabled=automation.enabled(), connections=connection_flags())
+                               automation_enabled=automation.enabled(), connections=connection_flags(),
+                               facebook_auth_mode=facebook.auth_mode(),
+                               hermes_owner=hermes_owner, hermes_cycle=hermes_cycle,
+                               posting_settings=posting_settings)
+
+    @app.get("/hermes")
+    def hermes_page():
+        root = app.config["DATABASE_PATH"].resolve().parent.parent
+        cycle = None
+        try:
+            cycle = json.loads((root / "data" / "hermes-last-cycle.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        return render_template(
+            "hermes.html", cycle=cycle,
+            posting_settings=database.get_posting_settings(app.config["DATABASE_PATH"]),
+            automation_status=database.automation_status(app.config["DATABASE_PATH"]),
+        )
+
+    @app.get("/hermes/status")
+    def hermes_status():
+        root = app.config["DATABASE_PATH"].resolve().parent.parent
+        return jsonify(hermes_control.snapshot(root))
+
+    @app.post("/hermes/<action>")
+    def hermes_action(action):
+        try:
+            message = hermes_control.control_job(app.config["DATABASE_PATH"].resolve().parent.parent, action)
+            flash(message, "success")
+        except hermes_control.HermesControlError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("hermes_page"))
+
+    @app.post("/account/posting-settings")
+    def update_posting_settings():
+        try:
+            settings = database.save_posting_settings(
+                app.config["DATABASE_PATH"],
+                request.form.get("posts_per_day", ""),
+                ", ".join(request.form.getlist("posting_times")),
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"Đã lưu {settings['posts_per_day']} bài tự động/ngày. Lịch đã xếp trước đó giữ nguyên.", "success")
+        return redirect(url_for("hermes_page"))
 
     @app.get("/facebook")
     def facebook_page():
         groups = database.list_facebook_groups(app.config["DATABASE_PATH"])
+        configured_id = os.environ.get("REUP_FACEBOOK_PAGE_ID", "").strip()
+        saved_name = os.environ.get("REUP_FACEBOOK_PAGE_NAME", "").strip()
+        saved_id = os.environ.get("REUP_FACEBOOK_PAGE_NAME_ID", "").strip()
         return render_template("facebook.html", groups=groups,
                                selected_count=sum(group["active"] for group in groups),
-                               page_ready=automation.page_ready())
+                               page_ready=automation.page_ready(),
+                               config_auth_mode=facebook.auth_mode(),
+                               configured_page_id=configured_id if configured_id.isdecimal() else "",
+                               configured_page_name=saved_name[:200] if saved_id == configured_id else "")
+
+    @app.get("/facebook/identity")
+    def facebook_identity():
+        return jsonify(facebook.page_identity())
 
     @app.post("/facebook/groups")
     def add_facebook_group():
@@ -221,7 +288,7 @@ def create_app(database_path: Path | None = None) -> Flask:
     @app.post("/discover")
     def discover():
         added, errors = discovery.scan_sources(app.config["DATABASE_PATH"])
-        flash(f"Đã tìm thấy {added} bài mới.", "success")
+        flash(f"Đã tìm thấy {added} bài báo/repo mới.", "success")
         for error in errors:
             flash(error, "error")
         return redirect(url_for("articles_page"))
@@ -237,7 +304,8 @@ def create_app(database_path: Path | None = None) -> Flask:
         if not database.list_post_images(app.config["DATABASE_PATH"], post_id):
             try:
                 media.prepare_post_image(app.config["DATABASE_PATH"], post_id)
-                flash("Đã tạo bản nháp và lưu ảnh minh họa.", "success")
+                image_count = len(database.list_post_images(app.config["DATABASE_PATH"], post_id))
+                flash(f"Đã tạo bản nháp và lưu {image_count} ảnh minh họa.", "success")
             except Exception as exc:
                 flash(f"Đã tạo bản nháp nhưng chưa lấy được ảnh: {exc}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
@@ -292,13 +360,24 @@ def create_app(database_path: Path | None = None) -> Flask:
 
     @app.post("/posts/<int:post_id>/images/upload")
     def upload_post_image(post_id):
-        file = request.files.get("image")
+        files = [file for file in request.files.getlist("images") if file.filename]
+        if not files:
+            files = [file for file in request.files.getlist("image") if file.filename]
         try:
-            if not file or not file.filename:
-                raise ValueError("Chọn một ảnh để tải lên")
-            raw = file.stream.read(media.MAX_IMAGE_BYTES + 1)
-            media.save_uploaded_post_image(app.config["DATABASE_PATH"], post_id, raw)
-            flash("Đã thêm ảnh vào bài viết.", "success")
+            if not files:
+                raise ValueError("Chọn ít nhất một ảnh để tải lên")
+            remaining = 10 - len(database.list_post_images(app.config["DATABASE_PATH"], post_id))
+            if len(files) > remaining:
+                raise ValueError(f"Chỉ thêm được tối đa {remaining} ảnh nữa")
+            prepared_images = []
+            for file in files:
+                raw = file.stream.read(media.MAX_IMAGE_BYTES + 1)
+                if not raw or len(raw) > media.MAX_IMAGE_BYTES:
+                    raise ValueError("Mỗi ảnh phải có dữ liệu và không quá 8 MB")
+                prepared_images.append(media.normalized_jpeg(raw))
+            for image in prepared_images:
+                media.save_post_image(app.config["DATABASE_PATH"], post_id, image, "", "upload")
+            flash(f"Đã thêm {len(files)} ảnh vào bài viết.", "success")
         except (ValueError, OSError) as exc:
             flash(f"Không thêm được ảnh: {exc}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
@@ -325,6 +404,36 @@ def create_app(database_path: Path | None = None) -> Flask:
                 flash(str(exc), "error")
         return redirect(url_for("edit_post", post_id=post_id))
 
+    @app.post("/posts/<int:post_id>/comment")
+    def save_first_comment(post_id):
+        try:
+            database.set_first_comment(app.config["DATABASE_PATH"], post_id,
+                                       request.form.get("first_comment_body", ""))
+            flash("Đã lưu bình luận đầu tiên.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("edit_post", post_id=post_id))
+
+    @app.post("/posts/<int:post_id>/comment/resolve")
+    def resolve_first_comment(post_id):
+        if request.form.get("checked_page") != "yes":
+            flash("Hãy kiểm tra bình luận trên Facebook Page trước.", "error")
+            return redirect(url_for("edit_post", post_id=post_id))
+        outcome = request.form.get("outcome")
+        if outcome not in {"posted", "absent"}:
+            abort(400)
+        try:
+            database.resolve_first_comment(app.config["DATABASE_PATH"], post_id, outcome == "posted")
+            if outcome == "absent":
+                queue.process_first_comment(app.config["DATABASE_PATH"], post_id)
+            current = database.get_post(app.config["DATABASE_PATH"], post_id)
+            flash("Đã cập nhật trạng thái bình luận." if current["first_comment_status"] == "posted"
+                  else "Chưa xác nhận được bình luận mới; hãy kiểm tra Page.",
+                  "success" if current["first_comment_status"] == "posted" else "error")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("edit_post", post_id=post_id))
+
     @app.post("/posts/<int:post_id>/generate")
     def generate_post(post_id):
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
@@ -334,9 +443,11 @@ def create_app(database_path: Path | None = None) -> Flask:
             flash("Không thể viết lại bài đã lên lịch hoặc đã đăng.", "error")
             return redirect(url_for("edit_post", post_id=post_id))
         try:
-            body = llm.write_draft(post["article_title"], post["article_summary"], post["article_url"])
+            body = llm.write_draft(post["article_title"], post["article_summary"], post["article_url"], post["source_kind"])
+            comment = llm.write_first_comment(post["article_title"], post["article_summary"], post["article_url"], body)
             database.update_draft(app.config["DATABASE_PATH"], post_id, body)
-            flash("Đã tạo nội dung bằng LLM. Hãy đọc lại trước khi đăng.", "success")
+            database.set_first_comment(app.config["DATABASE_PATH"], post_id, comment)
+            flash("Hermes đã viết bản nháp và chuẩn bị bình luận. Hãy đọc lại trước khi đăng.", "success")
         except Exception as exc:
             flash(f"Không tạo được bài: {exc}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
@@ -400,6 +511,11 @@ def create_app(database_path: Path | None = None) -> Flask:
                 raise ValueError("Chưa đủ cấu hình Facebook Page. Hãy dùng lịch thử nghiệm hoặc cấu hình Page trước")
             if not test_only and not automation.models_ready():
                 raise ValueError("Chưa đủ model viết bài và duyệt ảnh. Hãy dùng lịch thử nghiệm hoặc cấu hình AI trước")
+            if not test_only:
+                try:
+                    media.ensure_multiple_images(app.config["DATABASE_PATH"], post_id)
+                except media.MissingImageError:
+                    pass
             if test_only:
                 media.post_image_paths(app.config["DATABASE_PATH"], post_id)
             else:
@@ -431,15 +547,22 @@ def create_app(database_path: Path | None = None) -> Flask:
             flash("Chưa đủ cấu hình Facebook Page. Kiểm tra Tài khoản trước khi đăng.", "error")
         elif not automation.models_ready():
             flash("Chưa đủ model viết bài và duyệt ảnh. Kiểm tra Tài khoản trước khi đăng.", "error")
-        elif not database.claim_post(app.config["DATABASE_PATH"], post_id):
-            flash("Bài không ở trạng thái có thể đăng.", "error")
         else:
-            queue.process_claimed_post(app.config["DATABASE_PATH"], post_id)
-            post = database.get_post(app.config["DATABASE_PATH"], post_id)
-            if post["status"] == "published":
-                flash("Đã đăng lên Facebook Page.", "success")
+            try:
+                media.ensure_multiple_images(app.config["DATABASE_PATH"], post_id)
+            except media.MissingImageError:
+                pass
+            if not database.claim_post(app.config["DATABASE_PATH"], post_id):
+                flash("Bài không ở trạng thái có thể đăng.", "error")
             else:
-                flash(f"Chưa đăng: {post['last_error'] or post['status']}", "error")
+                queue.process_claimed_post(app.config["DATABASE_PATH"], post_id)
+                post = database.get_post(app.config["DATABASE_PATH"], post_id)
+                if post["status"] == "published" and post["first_comment_status"] == "posted":
+                    flash("Đã đăng bài và bình luận đầu tiên lên Facebook Page.", "success")
+                elif post["status"] == "published":
+                    flash("Bài đã đăng, nhưng bình luận chưa được xác nhận. Hãy kiểm tra trên Page.", "error")
+                else:
+                    flash(f"Chưa đăng: {post['last_error'] or post['status']}", "error")
         return redirect(url_for("edit_post", post_id=post_id))
 
     @app.post("/posts/<int:post_id>/resolve")

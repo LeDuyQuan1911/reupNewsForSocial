@@ -3,20 +3,25 @@
 {% block page_styles %}<link rel="stylesheet" href="{{ url_for('static', filename='facebook.css') }}">{% endblock %}
 {% block content %}
 <section class="panel facebook-page-setup" aria-labelledby="facebook-page-title">
-  <div class="section-heading"><div><h1 id="facebook-page-title">Đăng lên Facebook Page</h1><p>Đây là kênh được hệ thống hỗ trợ tự đăng theo lịch.</p></div><span class="connection-state {{ 'ready' if page_ready else '' }}">{{ 'Đã nhập thông số' if page_ready else 'Chưa có token' }}</span></div>
+  <div class="section-heading"><div><h1 id="facebook-page-title">Đăng lên Facebook Page</h1><p>Đây là kênh được hệ thống hỗ trợ tự đăng theo lịch.</p></div><span class="connection-state" id="facebook-page-badge" role="status">{{ 'Đang xác minh' if page_ready else 'Chưa kết nối' }}</span></div>
   <div class="facebook-page-content">
-    {% if page_ready %}
-    <p>Page ID, token và phiên bản API đã được đặt trên máy. Kiểm tra token bằng lệnh bên dưới, xem các bài đang chờ rồi thử một bài trước khi để lịch tự chạy.</p>
-    {% else %}
-    <p>Bạn đã có Page. Ứng dụng cần Page access token hợp lệ của đúng Page; không cần tạo Meta App mới nếu bạn đã có token được cấp từ một App/tích hợp phù hợp.</p>
-    {% endif %}
+    <div class="facebook-connected" data-identity-url="{{ url_for('facebook_identity') }}" data-saved-name="{{ configured_page_name }}">
+      <div><span class="facebook-connected-label">PAGE ĐANG CẤU HÌNH</span><h2 id="facebook-connected-name">{{ configured_page_name if configured_page_name else 'Đang xác minh tên Page…' if page_ready else 'Chưa có Facebook Page' }}</h2><p id="facebook-connected-id">{{ 'Page ID: ' ~ configured_page_id if configured_page_id else 'Chưa có Page ID' }}</p><p>Nguồn xác thực: {{ 'System User' if config_auth_mode == 'system_user' else 'Page token cá nhân' }}</p><p id="facebook-connected-status">{{ 'Tên đã lưu trước đây; đang xác minh token với Meta.' if configured_page_name else 'Đang kiểm tra token với Meta.' if page_ready else 'Cần Page ID và token hợp lệ để kết nối.' }}</p></div>
+      {% if configured_page_id %}<a class="secondary button-link" href="https://www.facebook.com/{{ configured_page_id }}" target="_blank" rel="noopener noreferrer">Mở Page ↗</a>{% endif %}
+    </div>
+    <p class="facebook-page-footnote">Trang này xác minh tên và ID Page bằng quyền đọc. Quyền đăng chỉ được xác nhận khi thử đăng một bài. Token không hiển thị trên website.</p>
+    <details class="facebook-setup-details" {% if not page_ready %}open{% endif %}>
+    <summary>{{ 'Xem cách kiểm tra hoặc đổi Page' if page_ready else 'Cách kết nối Facebook Page' }}</summary>
+    <p>Để vận hành tự động bằng System User, vào <a href="https://business.facebook.com/settings/" target="_blank" rel="noopener noreferrer">Business Settings</a> → Người dùng hệ thống. Gán App CreatePost và đúng Page, cấp quyền tạo nội dung; tạo token với <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_posts</code> (thêm <code>pages_manage_engagement</code> nếu dùng bình luận video). Sau đó chạy <code>.\scripts\configure-facebook-system-user.ps1</code> trong PowerShell và dán token ở lời nhắc ẩn. Dùng <code>-Check</code> để kiểm tra lại.</p>
+    <p>Đường kết nối Page token cũ:</p>
     <ol>
       <li>Nếu đã có Page token phù hợp, chuyển tới bước 4. Nếu chưa, dùng Meta App đang có hoặc <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer">tạo App mới</a> để lấy token.</li>
       <li>Trong <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer">Graph API Explorer</a>, chọn App, cấp quyền quản lý/đăng Page và tạo User access token.</li>
       <li>Gọi <code>/me/accounts?fields=id,name,access_token,tasks</code>, chọn đúng Page rồi lấy <strong>Page ID</strong> và <strong>Page access token</strong>. Giữ token trên máy của bạn.</li>
       <li>Mở PowerShell tại repo và chạy <code>.\scripts\configure-facebook-page.ps1{{ ' -Check' if page_ready else '' }}</code>. Script kiểm tra tên/ID Page trước khi lưu cấu hình.</li>
     </ol>
-    <p class="facebook-page-footnote">Kiểm tra tên Page là bước chỉ đọc; quyền đăng cần được xác nhận bằng một bài thử. Sau khi cấu hình, hãy xem <a href="{{ url_for('posts_page', view='action') }}">bài đang chờ</a> trước khi khởi động lại dashboard.</p>
+    <p class="facebook-page-footnote">Sau khi cấu hình, hãy xem <a href="{{ url_for('posts_page', view='action') }}">bài đang chờ</a> trước khi để lịch tự chạy.</p>
+    </details>
   </div>
 </section>
 <details class="facebook-deferred">
@@ -75,3 +80,4 @@
 </div>
 </details>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='facebook-page.js') }}" defer></script>{% endblock %}

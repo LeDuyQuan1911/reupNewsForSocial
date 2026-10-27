@@ -2,7 +2,7 @@
 {% block title %}Bài báo · reupNewsForSocial{% endblock %}
 {% block content %}
 <div class="page-actions">
-  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm bài mới ↗</button></form>
+  <form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary" type="submit" {% if not sources %}disabled{% endif %}>Tìm báo / repo mới ↗</button></form>
 </div>
 <form class="filter-bar" action="{{ url_for('articles_page') }}" method="get" role="search">
   <label for="article-search">Tìm bài</label><input id="article-search" name="q" type="search" value="{{ search }}" placeholder="Nhập tiêu đề hoặc từ khóa…" autocomplete="off">

@@ -23,6 +23,7 @@
       <a class="{{ 'active' if request.endpoint == 'workflow_page' else '' }}" href="{{ url_for('workflow_page') }}" {% if request.endpoint == 'workflow_page' %}aria-current="page"{% endif %}>Luồng đăng</a>
       <a class="{{ 'active' if request.endpoint in ['posts_page', 'edit_post'] else '' }}" href="{{ url_for('posts_page') }}" {% if request.endpoint in ['posts_page', 'edit_post'] %}aria-current="page"{% endif %}>Bài đăng</a>
       <a class="{{ 'active' if request.endpoint == 'sources_page' else '' }}" href="{{ url_for('sources_page') }}" {% if request.endpoint == 'sources_page' %}aria-current="page"{% endif %}>Nguồn thông tin</a>
+      <a class="{{ 'active' if request.endpoint in ['hermes_page', 'hermes_action', 'update_posting_settings'] else '' }}" href="{{ url_for('hermes_page') }}" {% if request.endpoint in ['hermes_page', 'hermes_action', 'update_posting_settings'] %}aria-current="page"{% endif %}>Hermes</a>
       <a class="{{ 'active' if request.endpoint in ['facebook_page', 'add_facebook_group', 'toggle_facebook_group', 'remove_facebook_group'] else '' }}" href="{{ url_for('facebook_page') }}" {% if request.endpoint == 'facebook_page' %}aria-current="page"{% endif %}>Facebook</a>
       <a class="{{ 'active' if request.endpoint == 'account_page' else '' }}" href="{{ url_for('account_page') }}" {% if request.endpoint == 'account_page' %}aria-current="page"{% endif %}>Tài khoản</a>
     </nav>

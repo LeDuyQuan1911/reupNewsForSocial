@@ -9,11 +9,12 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import parse_qs
+from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
 from PIL import Image
 
-from app import anthropic, database, facebook, facebook_groups, feeds, github, llm, media, queue, research, video
+from app import anthropic, database, facebook, facebook_groups, feeds, github, llm, media, queue, research, source_content, video
 from app.web import create_app
 
 
@@ -22,10 +23,17 @@ RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
 <description><![CDATA[<p>A brief <b>summary</b>.</p>]]></description>
 <pubDate>Fri, 23 Oct 2026 09:00:00 GMT</pubDate></item>
 </channel></rss>"""
+PROCESS_FIRST_COMMENT = queue.process_first_comment
 
 
 class DashboardTests(unittest.TestCase):
     def setUp(self):
+        image_env_patch = patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": ""})
+        image_env_patch.start()
+        self.addCleanup(image_env_patch.stop)
+        comment_patch = patch("app.queue.process_first_comment")
+        comment_patch.start()
+        self.addCleanup(comment_patch.stop)
         self.directory = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
         self.db_path = Path(self.directory.name) / "test.sqlite3"
         self.client = create_app(self.db_path).test_client()
@@ -41,6 +49,28 @@ class DashboardTests(unittest.TestCase):
         Image.new("RGB", (64, 32), "green").save(image_path, "JPEG")
         database.attach_image(self.db_path, post_id, image_path.name, "https://example.com/image.jpg")
         return image_path
+
+    def test_editor_uploads_multiple_images_and_saves_comment(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        files = []
+        for color in ("red", "blue"):
+            buffer = BytesIO()
+            Image.new("RGB", (640, 320), color).save(buffer, "PNG")
+            buffer.seek(0)
+            files.append((buffer, f"{color}.png"))
+        response = self.client.post(f"/posts/{post_id}/images/upload",
+                                    data={"csrf_token": self.csrf, "images": files},
+                                    content_type="multipart/form-data")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+        response = self.client.post(f"/posts/{post_id}/comment",
+                                    data={"csrf_token": self.csrf, "first_comment_body": "💬 Bạn muốn thử tính năng nào?"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(database.get_post(self.db_path, post_id)["first_comment_body"],
+                         "💬 Bạn muốn thử tính năng nào?")
 
     def test_article_video_discovery_uses_embedded_link_and_llm_selection(self):
         html = (b'<meta property="og:title" content="New AI model demo">'
@@ -74,6 +104,56 @@ class DashboardTests(unittest.TestCase):
                          ("published", "posted", "comment-1"))
         commenter.assert_called_once_with("123_456", "https://www.youtube.com/watch?v=AbCdEf12345")
 
+    def test_first_comment_is_sent_once_after_confirmed_publish(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        database.set_first_comment(self.db_path, post_id, "💬 Bạn thấy điểm nào hữu ích nhất?")
+        self.attach_test_image(post_id)
+        self.assertTrue(database.claim_post(self.db_path, post_id))
+        with patch("app.queue.llm.check_post", return_value=(True, "OK")) as review, \
+             patch("app.queue.facebook.publish_page", return_value="123_456"):
+            queue.process_claimed_post(self.db_path, post_id)
+        self.assertIn("💬 Bạn thấy điểm nào hữu ích nhất?", review.call_args.args[0])
+        self.assertEqual(database.get_post(self.db_path, post_id)["first_comment_status"], "pending")
+        with patch("app.facebook.comment_page", return_value="comment-1") as commenter:
+            PROCESS_FIRST_COMMENT(self.db_path, post_id)
+            PROCESS_FIRST_COMMENT(self.db_path, post_id)
+        commenter.assert_called_once_with("123_456", "💬 Bạn thấy điểm nào hữu ích nhất?")
+        self.assertEqual(database.get_post(self.db_path, post_id)["first_comment_status"], "posted")
+
+    def test_real_schedule_requires_first_comment(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        with database.connect(self.db_path) as db:
+            db.execute("UPDATE posts SET first_comment_body = '' WHERE id = ?", (post_id,))
+        with self.assertRaisesRegex(ValueError, "bình luận"):
+            database.schedule_post(self.db_path, post_id, "2026-10-30T01:00:00+00:00")
+        self.assertFalse(database.claim_post(self.db_path, post_id))
+
+    def test_uncertain_first_comment_requires_page_reconciliation(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        with database.connect(self.db_path) as db:
+            db.execute("UPDATE posts SET status = 'published', platform_post_id = '123_456', "
+                       "first_comment_status = 'pending' WHERE id = ?", (post_id,))
+        with patch("app.facebook.comment_page", side_effect=TimeoutError):
+            PROCESS_FIRST_COMMENT(self.db_path, post_id)
+        self.assertEqual(database.get_post(self.db_path, post_id)["first_comment_status"], "uncertain")
+        self.assertIn(post_id, [row["id"] for row in database.list_posts(self.db_path, view="action")])
+        self.assertNotIn(post_id, database.pending_first_comment_ids(self.db_path))
+        database.resolve_first_comment(self.db_path, post_id, already_posted=False)
+        with patch("app.facebook.comment_page", return_value="comment-2") as commenter:
+            PROCESS_FIRST_COMMENT(self.db_path, post_id)
+        commenter.assert_called_once()
+        self.assertEqual(database.get_post(self.db_path, post_id)["first_comment_status"], "posted")
+
     def test_uncertain_video_comment_does_not_republish_or_retry(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
         source_id = database.list_sources(self.db_path)[0]["id"]
@@ -101,7 +181,8 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(database.get_post(self.db_path, post_id)["video_comment_status"], "posted")
 
     def test_facebook_comment_uses_page_token_and_video_link(self):
-        settings = {"REUP_FACEBOOK_PAGE_TOKEN": "test-token", "REUP_META_GRAPH_VERSION": "v26.0"}
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
+                    "REUP_META_GRAPH_VERSION": "v26.0"}
         with patch.dict(os.environ, settings), patch("app.facebook.urlopen", return_value=BytesIO(b'{"id":"123_789"}')) as send:
             self.assertEqual(facebook.comment_video("123_456", "https://www.youtube.com/watch?v=AbCdEf12345"), "123_789")
         request = send.call_args.args[0]
@@ -209,7 +290,7 @@ class DashboardTests(unittest.TestCase):
         source_id = database.list_sources(self.db_path)[0]["id"]
         database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
         article_id = database.list_articles(self.db_path)[0]["id"]
-        for route, heading in (("/", "Tìm bài mới"), ("/articles", "Bài đã tìm thấy"),
+        for route, heading in (("/", "Tìm báo / repo mới"), ("/articles", "Bài đã tìm thấy"),
                                ("/sources", "RSS hoặc Atom"), ("/posts", "Tất cả bài đăng"),
                                ("/account", "Facebook Page"),
                                (f"/articles/{article_id}", "AI &amp; tools")):
@@ -338,7 +419,7 @@ class DashboardTests(unittest.TestCase):
             page = self.client.get("/facebook").get_data(as_text=True)
         self.assertIn("Đăng nhóm chưa hoạt động", page)
         self.assertIn("AI Việt Nam", page)
-        self.assertIn("Chưa có token", page)
+        self.assertIn("Chưa kết nối", page)
         self.client.post(f"/facebook/groups/{group['id']}/active",
                          data={"csrf_token": self.csrf, "active": "0"})
         self.assertEqual(database.list_facebook_groups(self.db_path)[0]["active"], 0)
@@ -369,6 +450,81 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('name="view" value="action"', page)
         self.assertIn('aria-current="page"', page)
 
+    def test_posting_settings_form_and_manual_discovery(self):
+        control = self.client.get("/hermes").get_data(as_text=True)
+        self.assertIn('name="posts_per_day"', control)
+        self.assertEqual(control.count('type="time" name="posting_times" value='), 6)
+        self.assertIn('type="time" name="posting_times" value="07:00"', control)
+        self.assertNotIn('type="text" name="posting_times"', control)
+        self.assertIn('Tìm bài mới', control)
+        self.client.post("/account/posting-settings", data={
+            "csrf_token": self.csrf, "posts_per_day": "2", "posting_times": ["08:00", "13:15"],
+        })
+        self.assertEqual(database.get_posting_settings(self.db_path)["times"], ("08:00", "13:15"))
+        home = self.client.get("/").get_data(as_text=True)
+        self.assertIn("0 / 2", home)
+        self.client.post("/account/posting-settings", data={
+            "csrf_token": self.csrf, "posts_per_day": "2", "posting_times": ["08:00", "08:10"],
+        })
+        self.assertEqual(database.get_posting_settings(self.db_path)["times"], ("08:00", "13:15"))
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        database.claim_daily_automation_scan(self.db_path, datetime.now(timezone.utc).isoformat())
+        with patch("app.web.discovery.scan_sources", return_value=(1, [])) as scan:
+            response = self.client.post("/discover", data={"csrf_token": self.csrf})
+        scan.assert_called_once_with(self.db_path)
+        self.assertEqual(response.location, "/articles")
+
+    def test_hermes_controls_require_csrf_and_use_fixed_actions(self):
+        with patch("app.web.hermes_control.snapshot", return_value={
+            "gateway_running": True, "job_state": "active", "runs": [], "error": None,
+        }) as snapshot, patch("app.web.hermes_control.control_job", return_value="Đã tạm dừng") as control:
+            page = self.client.get("/hermes")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('action="/hermes/pause"', page.get_data(as_text=True))
+            snapshot.assert_not_called()
+            status = self.client.get("/hermes/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertEqual(status.json["job_state"], "active")
+            snapshot.assert_called_once()
+            self.assertEqual(self.client.post("/hermes/pause").status_code, 403)
+            response = self.client.post("/hermes/pause", data={"csrf_token": self.csrf})
+            self.assertEqual(response.location, "/hermes")
+            control.assert_called_once_with(self.db_path.resolve().parent.parent, "pause")
+
+    def test_facebook_page_identity_shows_name_without_token(self):
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123456", "REUP_FACEBOOK_PAGE_TOKEN": "private-test-token",
+                    "REUP_META_GRAPH_VERSION": "v26.0", "REUP_FACEBOOK_PAGE_NAME": "Example Page",
+                    "REUP_FACEBOOK_PAGE_NAME_ID": "123456"}
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen") as fetch:
+            fetch.return_value.__enter__.return_value = BytesIO(b'{"id":"123456","name":"Example Page"}')
+            page = self.client.get("/facebook").get_data(as_text=True)
+            identity = self.client.get("/facebook/identity").json
+        self.assertIn("Page ID: 123456", page)
+        self.assertIn("Example Page", page)
+        self.assertEqual(identity["name"], "Example Page")
+        self.assertTrue(identity["verified"])
+        self.assertNotIn("private-test-token", page)
+        self.assertNotIn("private-test-token", str(identity))
+
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen") as fetch:
+            fetch.return_value.__enter__.return_value = BytesIO(b'{"id":"999","name":"Other Page"}')
+            mismatch = self.client.get("/facebook/identity").json
+        self.assertFalse(mismatch["verified"])
+        self.assertEqual(mismatch["name"], "")
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen", side_effect=HTTPError(
+            "https://graph.facebook.com/", 401, "Unauthorized", {}, None,
+        )):
+            expired = self.client.get("/facebook/identity").json
+        self.assertFalse(expired["verified"])
+        self.assertIn("token", expired["error"])
+        self.assertNotIn("private-test-token", str(expired))
+        graph_error = b'{"error":{"code":190,"error_subcode":463}}'
+        with patch.dict(os.environ, settings), patch("app.facebook.urlopen", side_effect=HTTPError(
+            "https://graph.facebook.com/", 401, "Unauthorized", {}, BytesIO(graph_error),
+        )):
+            expired = self.client.get("/facebook/identity").json
+        self.assertIn("hết hạn", expired["error"])
+
     def test_real_schedule_requires_connections_but_test_schedule_does_not(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
         source_id = database.list_sources(self.db_path)[0]["id"]
@@ -390,7 +546,7 @@ class DashboardTests(unittest.TestCase):
         post = database.get_post(self.db_path, post_id)
         self.assertEqual((post["status"], post["test_only"]), ("scheduled", 1))
         database.unschedule_post(self.db_path, post_id)
-        with patch.dict(os.environ, {"REUP_FACEBOOK_PAGE_ID": "test-page", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
+        with patch.dict(os.environ, {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
                                      "REUP_META_GRAPH_VERSION": "v99.0", "REUP_LLM_MODEL": "test-text",
                                      "REUP_LLM_VISION_MODEL": "test-vision"}):
             self.client.post(f"/posts/{post_id}/schedule",
@@ -662,6 +818,32 @@ class DashboardTests(unittest.TestCase):
         with Image.open(replacement) as image:
             self.assertEqual(image.size, (1200, 630))
 
+    def test_new_article_prefers_three_distinct_source_images(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, [{
+            "title": "AI launch", "url": "https://example.com/story", "summary": "",
+            "published_at": "", "image_url": "https://cdn.example.com/one.png",
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        urls = [f"https://cdn.example.com/{name}.png" for name in ("one", "duplicate", "two", "three")]
+        colors = {"one": "red", "duplicate": "red", "two": "blue", "three": "green"}
+
+        def fetch_image(url, _limit):
+            color = colors[url.rsplit("/", 1)[-1].split(".")[0]]
+            output = BytesIO()
+            Image.new("RGB", (640, 320), color).save(output, "PNG")
+            return output.getvalue(), url
+
+        with patch("app.media.find_article_images", return_value=urls), \
+             patch("app.media.fetch_public_bytes", side_effect=fetch_image):
+            media.prepare_post_image(self.db_path, post_id)
+            with self.assertRaisesRegex(media.MissingImageError, "Không còn ảnh mới"):
+                media.prepare_post_image(self.db_path, post_id, append=True)
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual(len(images), 3)
+        self.assertEqual([row["source_url"] for row in images], [urls[0], urls[2], urls[3]])
+
     def test_missing_source_image_uses_9router_image_model(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
         source_id = database.list_sources(self.db_path)[0]["id"]
@@ -672,12 +854,53 @@ class DashboardTests(unittest.TestCase):
         post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
         output = BytesIO()
         Image.new("RGB", (800, 450), "blue").save(output, "PNG")
+        companion = BytesIO()
+        Image.new("RGB", (800, 450), "green").save(companion, "PNG")
         with patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": "image-test"}), \
              patch("app.media.find_article_images", side_effect=media.MissingImageError("No image")), \
-             patch("app.llm.generate_image", return_value=output.getvalue()) as generate:
+             patch("app.llm.generate_image", side_effect=[output.getvalue(), companion.getvalue()]) as generate:
             media.prepare_post_image(self.db_path, post_id)
-        generate.assert_called_once_with("Robot walking", "Robot learns to walk")
+        self.assertEqual(generate.call_count, 2)
+        self.assertEqual(generate.call_args_list[1].kwargs, {"variant": 2})
         self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "router_generated")
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+
+    def test_one_source_image_gets_ai_companion_automatically(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        url = "https://cdn.example.com/cover.png"
+        database.save_articles(self.db_path, source_id, [{
+            "title": "Robot walking", "url": "https://example.com/robot", "summary": "Robot learns to walk",
+            "published_at": "", "image_url": url,
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        cover = BytesIO()
+        Image.new("RGB", (800, 450), "blue").save(cover, "PNG")
+        companion = BytesIO()
+        Image.new("RGB", (800, 450), "green").save(companion, "PNG")
+        with patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": "image-test"}), \
+             patch("app.media.find_article_images", return_value=[url]), \
+             patch("app.media.fetch_public_bytes", return_value=(cover.getvalue(), url)), \
+             patch("app.llm.generate_image", return_value=companion.getvalue()) as generate:
+            media.prepare_post_image(self.db_path, post_id)
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual([image["kind"] for image in images], ["source", "router_generated"])
+        generate.assert_called_once_with("Robot walking", "Robot learns to walk", variant=2)
+
+    def test_existing_one_image_draft_is_topped_up_without_upload(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        self.attach_test_image(post_id)
+        companion = BytesIO()
+        Image.new("RGB", (800, 450), "green").save(companion, "PNG")
+        with patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": "image-test"}), \
+             patch("app.media.find_article_images", return_value=[]), \
+             patch("app.llm.generate_image", return_value=companion.getvalue()) as generate:
+            media.ensure_multiple_images(self.db_path, post_id)
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+        generate.assert_called_once_with("AI & tools", "A brief summary .", variant=2)
 
     def test_9router_image_generation_uses_local_images_endpoint(self):
         output = BytesIO()
@@ -698,6 +921,22 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(json.loads(request.data)["size"], "1792x1024")
         self.assertIn("Simulation; Walking", json.loads(request.data)["prompt"])
 
+    def test_companion_image_uses_distinct_source_grounded_prompt(self):
+        output = BytesIO()
+        Image.new("RGB", (640, 360), "blue").save(output, "PNG")
+        result = json.dumps({"data": [{"b64_json": base64.b64encode(output.getvalue()).decode()}]}).encode()
+        settings = {"REUP_LLM_BASE_URL": "http://127.0.0.1:20128/v1",
+                    "REUP_LLM_IMAGE_MODEL": "image-test", "REUP_LLM_API_KEY": "test-only"}
+        brief = '{"headline":"Robot","subtitle":"Walking research","steps":[]}'
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.llm.chat", return_value=brief), \
+             patch("app.llm.urlopen", return_value=BytesIO(result)) as call:
+            llm.generate_image("Robot walking", "Robot learns to walk", variant=2)
+        prompt = json.loads(call.call_args.args[0].data)["prompt"]
+        self.assertIn("companion editorial illustration", prompt)
+        self.assertIn("ONE concrete source-grounded", prompt)
+        self.assertNotIn("three connected panels", prompt)
+
     def test_image_generation_rejects_remote_router(self):
         with patch.dict(os.environ, {"REUP_LLM_BASE_URL": "https://example.com/v1",
                                        "REUP_LLM_IMAGE_MODEL": "image-test"}, clear=True):
@@ -716,6 +955,11 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("Ảnh phải thể hiện trực tiếp chủ đề", messages[0]["content"])
         self.assertTrue(messages[1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
 
+    def test_vision_verdict_accepts_json_fence_but_rejects_ambiguous_text(self):
+        self.assertEqual(llm.parse_verdict('```json\n{"allowed": true, "reason": "OK"}\n```'), (True, "OK"))
+        with self.assertRaises(ValueError):
+            llm.parse_verdict('Có thể đăng. {"allowed": true, "reason": "OK"}')
+
     def test_facebook_photo_endpoint_uses_image_and_caption(self):
         image_path = self.db_path.parent / "photo.jpg"
         Image.new("RGB", (32, 32), "red").save(image_path, "JPEG")
@@ -729,6 +973,58 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(request.full_url, "https://graph.facebook.com/v26.0/123/photos")
         self.assertIn(b"A caption", request.data)
         self.assertIn(b'name="source"', request.data)
+
+    def test_system_user_resolves_page_token_and_never_uses_stale_token(self):
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_META_GRAPH_VERSION": "v26.0",
+                    "REUP_FACEBOOK_AUTH_MODE": "system_user",
+                    "REUP_FACEBOOK_SYSTEM_USER_TOKEN": "system-secret",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "stale-page-secret"}
+        pages = b'{"data":[{"id":"123","name":"Example","access_token":"system-page-secret"}]}'
+        with patch.dict(os.environ, settings, clear=True), patch("app.facebook.urlopen", side_effect=[
+            BytesIO(pages), BytesIO(b'{"id":"photo-1","post_id":"post-1"}')
+        ]) as send:
+            self.assertEqual(facebook.publish_page("Caption", b"\xff\xd8\xffimage"), "post-1")
+        lookup, publish = [call.args[0] for call in send.call_args_list]
+        self.assertIn("/me/accounts?", lookup.full_url)
+        self.assertEqual(lookup.get_header("Authorization"), "Bearer system-secret")
+        self.assertEqual(publish.full_url, "https://graph.facebook.com/v26.0/123/photos")
+        self.assertIn(b"system-page-secret", publish.data)
+        self.assertNotIn(b"stale-page-secret", publish.data)
+
+        with patch.dict(os.environ, settings, clear=True), patch("app.facebook.urlopen", return_value=BytesIO(b'{"data":[]}')):
+            with self.assertRaises(facebook.PageConfigurationError):
+                facebook.publish_page("Caption", b"\xff\xd8\xffimage")
+
+    def test_system_user_page_identity_and_comment_use_derived_page_token(self):
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_META_GRAPH_VERSION": "v26.0",
+                    "REUP_FACEBOOK_AUTH_MODE": "system_user", "REUP_FACEBOOK_SYSTEM_USER_TOKEN": "system-secret"}
+        pages = b'{"data":[{"id":"123","name":"Example","access_token":"derived-page-secret"}]}'
+        with patch.dict(os.environ, settings, clear=True), patch("app.facebook.urlopen", side_effect=[
+            BytesIO(pages), BytesIO(b'{"id":"123","name":"Example"}')
+        ]) as send:
+            identity = facebook.page_identity()
+        self.assertTrue(identity["verified"])
+        self.assertNotIn("derived-page-secret", str(identity))
+        self.assertEqual(send.call_args_list[1].args[0].get_header("Authorization"), "Bearer derived-page-secret")
+
+        with patch.dict(os.environ, settings, clear=True), patch("app.facebook.urlopen", side_effect=[
+            BytesIO(pages), BytesIO(b'{"id":"comment-1"}')
+        ]) as send:
+            self.assertEqual(facebook.comment_video("123_456", "https://example.com/video"), "comment-1")
+        self.assertEqual(send.call_args_list[1].args[0].get_header("Authorization"), "Bearer derived-page-secret")
+
+    def test_system_user_page_lookup_follows_cursor_without_token_in_url(self):
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_META_GRAPH_VERSION": "v26.0",
+                    "REUP_FACEBOOK_AUTH_MODE": "system_user", "REUP_FACEBOOK_SYSTEM_USER_TOKEN": "system-secret"}
+        first = b'{"data":[{"id":"999","access_token":"other"}],"paging":{"cursors":{"after":"next"}}}'
+        second = b'{"data":[{"id":"123","access_token":"selected"}]}'
+        with patch.dict(os.environ, settings, clear=True), patch("app.facebook.urlopen", side_effect=[
+            BytesIO(first), BytesIO(second)
+        ]) as send:
+            self.assertEqual(facebook.page_token("123", "v26.0"), "selected")
+        urls = [call.args[0].full_url for call in send.call_args_list]
+        self.assertIn("after=next", urls[1])
+        self.assertTrue(all("secret" not in url for url in urls))
 
     def test_facebook_multiple_photos_attach_to_one_feed_post(self):
         settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-token",
@@ -763,9 +1059,10 @@ class DashboardTests(unittest.TestCase):
         Image.new("RGB", (1280, 900), "green").save(output, "PNG")
         with patch("app.media.repository_image_urls", return_value=[]), patch("app.media.screenshot_repository", return_value=output.getvalue()) as screenshot:
             media.prepare_post_image(self.db_path, post_id)
-            media.prepare_post_image(self.db_path, post_id, append=True)
+            with self.assertRaisesRegex(media.MissingImageError, "Không còn ảnh mới"):
+                media.prepare_post_image(self.db_path, post_id, append=True)
         self.assertEqual(screenshot.call_count, 2)
-        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 1)
         self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "screenshot")
 
     def test_github_post_prefers_image_in_repository_readme(self):
@@ -780,14 +1077,17 @@ class DashboardTests(unittest.TestCase):
         output = BytesIO()
         Image.new("RGB", (800, 450), "blue").save(output, "PNG")
         readme_image = "https://raw.githubusercontent.com/owner/project/main/demo.png"
+        screenshot_image = BytesIO()
+        Image.new("RGB", (1280, 900), "green").save(screenshot_image, "PNG")
         with patch("app.media.repository_image_urls", return_value=[readme_image]), \
              patch("app.media.fetch_public_bytes", return_value=(output.getvalue(), readme_image)), \
-             patch("app.media.screenshot_repository") as screenshot:
+             patch("app.media.screenshot_repository", return_value=screenshot_image.getvalue()) as screenshot:
             media.prepare_post_image(self.db_path, post_id)
         post = database.get_post(self.db_path, post_id)
         self.assertEqual(post["image_kind"], "repo_asset")
         self.assertEqual(post["image_source_url"], readme_image)
-        screenshot.assert_not_called()
+        screenshot.assert_called_once()
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
 
     def test_repository_readme_image_urls_resolve_relative_paths_and_skip_badges(self):
         readme = "![Build](https://example.com/badge.svg)\n![Demo](assets/demo.png)\n<img src='images/flow.jpg'>"
@@ -801,6 +1101,61 @@ class DashboardTests(unittest.TestCase):
             "https://raw.githubusercontent.com/owner/project/main/assets/demo.png",
             "https://raw.githubusercontent.com/owner/project/main/images/flow.jpg",
         ])
+
+    def test_repository_images_prioritize_demo_over_decorative_cover(self):
+        readme = "![Cover](assets/cover.png)\n![App screenshot](assets/app.png)\n![Logo](logo.png)"
+        document = json.dumps({
+            "download_url": "https://raw.githubusercontent.com/owner/project/main/README.md",
+            "content": base64.b64encode(readme.encode()).decode(),
+        }).encode()
+        with patch("app.media.fetch_public_bytes", return_value=(document, "https://api.github.com/repos/owner/project/readme")):
+            urls = media.repository_image_urls("https://github.com/owner/project")
+        self.assertEqual(urls, [
+            "https://raw.githubusercontent.com/owner/project/main/assets/app.png",
+            "https://raw.githubusercontent.com/owner/project/main/assets/cover.png",
+        ])
+
+    def test_draft_uses_article_body_and_falls_back_when_source_unavailable(self):
+        html = (b"<main><nav>Unrelated menu</nav><article>"
+                b"<h1>A robot walks</h1><p>The robot walks on uneven ground using its new controller.</p>"
+                b"<p>Researchers shared a video showing the robot recovering its balance.</p>"
+                b"</article></main>")
+        with patch("app.source_content.fetch_public_bytes", return_value=(html, "https://example.com/story")):
+            excerpt = source_content.source_excerpt("https://example.com/story", "rss")
+        self.assertIn("uneven ground", excerpt)
+        self.assertNotIn("Unrelated menu", excerpt)
+        with patch("app.source_content.source_excerpt", return_value=excerpt), patch("app.hermes_writer.write_with_hermes", return_value="Bản nháp 💡") as writer:
+            llm.write_draft("Robot", "Short summary", "https://example.com/story")
+        self.assertIn("uneven ground", writer.call_args.args[0])
+        with patch("app.source_content.source_excerpt", side_effect=ValueError("unavailable")), patch("app.hermes_writer.write_with_hermes", return_value="Bản nháp 💡") as writer:
+            llm.write_draft("Robot", "Short summary", "https://example.com/story")
+        self.assertIn("chỉ dùng tiêu đề và tóm tắt", writer.call_args.args[0])
+
+    def test_github_draft_reads_readme_without_image_markup(self):
+        readme = "# Tool\n![Demo](demo.png)\nRuns a local editor and exports real files."
+        document = json.dumps({
+            "download_url": "https://raw.githubusercontent.com/owner/project/main/README.md",
+            "content": base64.b64encode(readme.encode()).decode(),
+        }).encode()
+        with patch("app.source_content.fetch_public_bytes", return_value=(document, "https://api.github.com/repos/owner/project/readme")):
+            excerpt = source_content.source_excerpt("https://github.com/owner/project", "github")
+        self.assertIn("exports real files", excerpt)
+        self.assertNotIn("demo.png", excerpt)
+
+    def test_draft_retries_without_emoji_and_removes_duplicate_source_link(self):
+        url = "https://example.com/story"
+        with patch("app.source_content.source_excerpt", return_value="Grounded article detail"), patch(
+            "app.hermes_writer.write_with_hermes", side_effect=["Bài đầu không có icon", f"💡 Bài viết đã có icon\n\n{url}"]
+        ) as writer:
+            draft = llm.write_draft("Story", "Summary", url)
+        self.assertEqual(writer.call_count, 2)
+        self.assertIn("💡", draft)
+        self.assertEqual(draft.count(url), 1)
+        with patch("app.source_content.source_excerpt", return_value=""), patch(
+            "app.hermes_writer.write_with_hermes", return_value="Không có icon"
+        ):
+            with self.assertRaisesRegex(ValueError, "icon phù hợp"):
+                llm.write_draft("Story", "Summary", url)
 
     def test_article_tries_other_images_after_unusable_cover(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")

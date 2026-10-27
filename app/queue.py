@@ -29,8 +29,9 @@ def process_claimed_post(path: Path, post_id: int) -> None:
             database.finish_post(path, post_id, "blocked", error="Tin tương tự đã được đăng trong 14 ngày gần đây")
             return
         images = [image_path.read_bytes() for image_path in media.publishable_post_image_paths(path, post_id)]
+        review_text = f"{post['body']}\n\nBình luận đầu tiên: {post['first_comment_body']}"
         for image in images:
-            allowed, reason = llm.check_post(post["body"], image)
+            allowed, reason = llm.check_post(review_text, image)
             if not allowed:
                 database.finish_post(path, post_id, "blocked", error=reason or "Nội dung hoặc ảnh cần xem lại")
                 return
@@ -52,7 +53,21 @@ def process_claimed_post(path: Path, post_id: int) -> None:
         )
         return
     database.finish_post(path, post_id, "published", platform_post_id=platform_post_id, published_at=now_utc())
+    process_first_comment(path, post_id)
     process_video_comment(path, post_id)
+
+
+def process_first_comment(path: Path, post_id: int) -> None:
+    claimed = database.claim_first_comment(path, post_id)
+    if claimed is None:
+        return
+    try:
+        comment_id = facebook.comment_page(claimed["platform_post_id"], claimed["first_comment_body"])
+    except Exception as exc:
+        database.finish_first_comment(path, post_id, error=f"{type(exc).__name__}: cần kiểm tra bình luận trên Page")
+        logging.warning("First comment needs reconciliation for post %s: %s", post_id, type(exc).__name__)
+    else:
+        database.finish_first_comment(path, post_id, comment_id=comment_id)
 
 
 def process_video_comment(path: Path, post_id: int) -> None:
@@ -73,6 +88,8 @@ def process_due_posts(path: Path) -> int:
     ids = database.claim_due_posts(path, now_utc())
     for post_id in ids:
         process_claimed_post(path, post_id)
+    for post_id in database.pending_first_comment_ids(path):
+        process_first_comment(path, post_id)
     for post_id in database.pending_video_comment_ids(path):
         process_video_comment(path, post_id)
     return len(ids)
