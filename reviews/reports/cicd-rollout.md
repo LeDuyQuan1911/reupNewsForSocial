@@ -2,15 +2,15 @@
 
 - Reviewer: Codex reviewer độc lập
 - Ngày: 2026-10-27
-- Base / head: `6f578cec842e8db3b6cbc533bdb6bc27809dfc50` / `ac6dac55f5db1b466eada47855d73d3f10f58a62` (head mới thêm `tzdata` so với `2e410a845a60a86450086b06649e31b496a21541`)
-- Vòng: độc lập
+- Base / head: `6f578cec842e8db3b6cbc533bdb6bc27809dfc50` / `ceb842d9fb03cf1645effd3e1740acaf1a57eb7b` (lượt đầu kết thúc tại `ac6dac55f5db1b466eada47855d73d3f10f58a62`)
+- Vòng: đối chiếu
 - Trạng thái: hoàn tất
 
 ## Phạm vi và kiểm tra
 
 - File/luồng đã xem: yêu cầu review, `SPEC.md`, `docs/deployment.md`, workflow CI, `scripts/cd/`, runner Hermes, các điểm khởi tạo DB, đăng Page và test liên quan. Diff ứng dụng được kiểm tra; snapshot `vendor/hermes-agent/` không được review toàn bộ vì ngoài phạm vi thay đổi tích hợp.
 - Lệnh đã chạy và kết quả: `python -m unittest discover -s tests -q` chạy 95 test nhưng có 2 fail/3 error khi thừa hưởng cấu hình Facebook ở máy review; chạy lại với đúng các biến môi trường rỗng/cờ tắt như CI: 95/95 pass. `python scripts/cd/smoke.py`: pass. PowerShell parser cho hai script CD: pass. `git diff --check` cho phần ngoài vendor và diff bổ sung `tzdata`: pass. Đối chiếu diff `2e410a84..ac6dac55`: chỉ thêm `tzdata>=2024.1` vào `requirements.txt`.
-- Phần chưa kiểm chứng: Chưa chạy GitHub Actions hoặc updater/task scheduler trên server Windows thật, chưa gọi Page/9Router. Worktree review ở commit cũ, còn commit head mới chỉ được đọc bằng `git diff`.
+- Phần chưa kiểm chứng: Chưa chạy GitHub Actions hoặc updater/task scheduler trên server Windows thật, chưa gọi Page/9Router. Head đối chiếu đã được checkout tạm để chạy test rồi trả lại branch review.
 
 ## Phát hiện
 
@@ -26,8 +26,9 @@
 
 ## Đối chiếu sau phản hồi tác giả
 
-Chưa thực hiện.
+- **Phát hiện P1 được sửa tại `ceb842d9`.** `app/web.py:25–31` trả 503 cho mọi request ngoài `/healthz` khi có `data/deployment-paused`; updater gọi `/healthz` để kiểm tra dashboard. Test mới xác nhận GET `/`, POST và health check khi marker tồn tại. Trước lúc gọi `hermes cron resume`, web không thể gửi Page hoặc ghi DB qua route; nếu đã thử resume mà có lỗi, updater giữ marker và không tự phục hồi DB (`scripts/cd/update-server.ps1:150–163`). Do đó chuỗi gây mất trạng thái bài đăng trong phát hiện ban đầu không còn xảy ra theo code hiện tại.
+- Kiểm tra độc lập trên head `ceb842d9`: 96/96 test pass với biến môi trường CI; smoke pass; cú pháp PowerShell pass; `git diff --check ac6dac55..ceb842d9` pass. Không thấy P1 mới trong diff đối chiếu.
 
 ## Kết luận cho chủ repo
 
-Một rủi ro P1 còn lại: rollback sau khi dashboard mới mở có thể xóa dấu vết bài vừa đăng và cho phép đăng trùng. Cần xử lý trước khi cho updater tự chạy trên server. Reviewer không quyết định merge.
+Phát hiện P1 ban đầu đã được sửa trong diff đối chiếu. Chưa kiểm chứng hành vi updater/task scheduler và Page trên server Windows thật; lỗi sau khi thử resume cần đối chiếu thủ công theo thiết kế. Reviewer không quyết định merge.
