@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 & (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $repoRoot
 $hermes = Join-Path $env:LOCALAPPDATA 'hermes\bin\hermes.exe'
