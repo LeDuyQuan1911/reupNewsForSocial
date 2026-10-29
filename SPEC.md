@@ -12,6 +12,8 @@ Trạng thái: **đang phát triển từng bước**. Stack cục bộ đã ch�
 
 ## Yêu cầu đã xác nhận
 
+- Các script cài/vận hành server Windows phải chạy được bằng Windows PowerShell 5.1 mặc định, kể cả khi có thông báo tiếng Việt UTF-8; CI kiểm tra cú pháp bằng `powershell.exe` trước khi triển khai.
+
 - Dashboard, Hermes runner và script khởi động đọc cấu hình từ `.env` cục bộ ở thư mục repo để chuyển máy dễ hơn. `.env` chứa key/token thật chỉ nằm trên từng máy và bị Git bỏ qua; `.env.example` chỉ có giá trị mẫu. Khi có cả `.env` và biến môi trường User, `.env` được ưu tiên.
 
 - Hermes chủ động tìm bài mới ngoài các nguồn RSS/GitHub đang cấu hình trong lượt tìm hằng ngày và khi bấm nút tìm thủ công. Hermes nhận ngữ cảnh biên tập của chủ dự án, dùng công cụ web để đề xuất URL gốc theo thứ tự ưu tiên. Ứng dụng tải lại trang gốc, kiểm tra HTTPS công khai, tiêu đề, tóm tắt và ngày công bố trong 48 giờ trước khi lưu; đề xuất không đạt bị bỏ qua. Nguồn cũ tiếp tục được quét khi Hermes hoặc web search lỗi. Không mặc nhiên coi kết quả này là đã xác minh toàn văn hay độ tin cậy của mọi chi tiết.

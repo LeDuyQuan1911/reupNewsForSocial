@@ -251,6 +251,13 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Hệ quả / khi nào xem lại: phụ thuộc web search backend của Hermes và khả năng tool calling của model 9Router; trang thiếu metadata ngày sẽ không được nhận. Chưa đối chiếu toàn văn qua nhiều nguồn.
 # Cấu hình runtime theo máy
 
+### 2026-10-29 — PowerShell 5.1 cần UTF-8 BOM cho script tiếng Việt
+
+- Bối cảnh: máy server chỉ có Windows PowerShell 5.1; `install-hermes-automation.ps1` chứa tiếng Việt UTF-8 không BOM nên parser đọc sai và dừng trước khi cài cron.
+- Quyết định: thêm UTF-8 BOM cho các script `.ps1` có tiếng Việt chưa có BOM; CI Windows gọi parser của `powershell.exe` cho toàn bộ script để bắt lỗi tương tự.
+- Lý do: không cần cài PowerShell 7 trên server và không thay nội dung lệnh vận hành.
+- Hệ quả: file nguồn có BOM; khi sửa những script này cần giữ BOM để tương thích PowerShell 5.1.
+
 ### 2026-10-29 — Ưu tiên `.env` cục bộ
 
 - Bối cảnh: chuyển hệ thống sang Windows server bằng các biến môi trường User gây khó thao tác và dễ lệch cấu hình giữa hai máy.
