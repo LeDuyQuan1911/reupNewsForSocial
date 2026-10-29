@@ -13,7 +13,7 @@ ROOT_POINTER = SCRIPT_DIR / "reupnews-root.txt"
 ENV_NAMES = (
     "REUP_LLM_BASE_URL", "REUP_LLM_MODEL", "REUP_LLM_VISION_MODEL",
     "REUP_LLM_IMAGE_MODEL", "REUP_LLM_API_KEY", "REUP_HERMES_BIN",
-    "REUP_AUTO_ENABLED", "REUP_FACEBOOK_PAGE_ID", "REUP_FACEBOOK_PAGE_TOKEN",
+    "REUP_AUTO_ENABLED", "REUP_HERMES_DISCOVERY_ENABLED", "REUP_FACEBOOK_PAGE_ID", "REUP_FACEBOOK_PAGE_TOKEN",
     "REUP_FACEBOOK_AUTH_MODE", "REUP_FACEBOOK_SYSTEM_USER_TOKEN",
     "REUP_META_GRAPH_VERSION", "REUP_SECRET_KEY",
 )
@@ -93,6 +93,12 @@ def exclusive_cycle(root: Path):
 def main() -> int:
     load_user_environment()
     root = project_root()
+    sys.path.insert(0, str(root))
+    try:
+        from app.local_env import load_local_env
+        load_local_env(root)
+    finally:
+        sys.path.remove(str(root))
     if "--check" in sys.argv[1:]:
         print("Hermes automation job ready")
         return 0

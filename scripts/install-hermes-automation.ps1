@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $repoRoot
 $hermes = Join-Path $env:LOCALAPPDATA 'hermes\bin\hermes.exe'
 $hermesScripts = Join-Path $env:LOCALAPPDATA 'hermes\scripts'
 $jobScript = Join-Path $hermesScripts 'reupnews-automation.py'

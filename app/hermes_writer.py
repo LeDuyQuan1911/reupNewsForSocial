@@ -2,12 +2,18 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EDITORIAL_BRIEF = REPO_ROOT / "docs" / "editorial-brief.md"
+
+
+def _clean_cli_output(raw: str) -> str:
+    """Hermes may prefix a local session id even with --quiet."""
+    return re.sub(r"^session_id:\s*local-[0-9a-f]{64}", "", raw.strip()).strip()
 
 
 def hermes_executable() -> str:
@@ -58,7 +64,7 @@ def write_with_hermes(article_context: str, previous_draft: str = "") -> str:
         raise ValueError("Hermes viết bài quá thời gian chờ") from exc
     if result.returncode != 0:
         raise ValueError("Hermes không tạo được bản nháp; kiểm tra cấu hình 9Router/Hermes")
-    draft = result.stdout.strip()
+    draft = _clean_cli_output(result.stdout)
     if not draft or len(draft) > 12000:
         raise ValueError("Hermes trả nội dung bản nháp không hợp lệ")
     return draft
@@ -87,7 +93,7 @@ def write_comment_with_hermes(article_context: str, post_body: str) -> str:
                                 encoding="utf-8", cwd=REPO_ROOT, timeout=120, check=False)
     except subprocess.TimeoutExpired as exc:
         raise ValueError("Hermes viết bình luận quá thời gian chờ") from exc
-    comment = result.stdout.strip()
+    comment = _clean_cli_output(result.stdout)
     if result.returncode != 0 or not 1 <= len(comment) <= 2000:
         raise ValueError("Hermes không tạo được bình luận hợp lệ")
     return comment

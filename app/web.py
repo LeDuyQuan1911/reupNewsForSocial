@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 
-from . import automation, database, discovery, facebook, facebook_groups, feeds, hermes_control, llm, media, queue, video
+from . import automation, database, discovery, facebook, facebook_groups, feeds, hermes_control, hermes_research, llm, media, queue, video
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -189,6 +189,7 @@ def create_app(database_path: Path | None = None) -> Flask:
             pass
         return render_template(
             "hermes.html", cycle=cycle,
+            web_research_enabled=hermes_research.enabled(),
             posting_settings=database.get_posting_settings(app.config["DATABASE_PATH"]),
             automation_status=database.automation_status(app.config["DATABASE_PATH"]),
         )
@@ -302,6 +303,15 @@ def create_app(database_path: Path | None = None) -> Flask:
     @app.post("/discover")
     def discover():
         added, errors = discovery.scan_sources(app.config["DATABASE_PATH"])
+        if hermes_research.enabled():
+            try:
+                found, research_errors = hermes_research.find_articles(
+                    app.config["DATABASE_PATH"], datetime.now(timezone.utc),
+                    database.get_posting_settings(app.config["DATABASE_PATH"])["posts_per_day"])
+                added += found
+                errors.extend(research_errors)
+            except Exception as exc:
+                errors.append(f"Hermes tìm web lỗi: {type(exc).__name__}")
         flash(f"Đã tìm thấy {added} bài báo/repo mới.", "success")
         for error in errors:
             flash(error, "error")
@@ -471,7 +481,7 @@ def create_app(database_path: Path | None = None) -> Flask:
         post = database.get_post(app.config["DATABASE_PATH"], post_id)
         if post is None:
             abort(404)
-        if post["status"] not in {"draft", "blocked", "failed"} or post["source_kind"] == "github":
+        if post["status"] not in {"draft", "blocked", "failed"} or post["source_kind"] in {"github", "hermes_github"}:
             flash("Chỉ tìm video cho bản nháp bài báo.", "error")
         else:
             try:

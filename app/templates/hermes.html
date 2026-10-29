@@ -31,7 +31,7 @@
         <button class="primary" type="submit">Lưu lịch đăng</button>
       </form>
       <template id="posting-time-template"><div class="posting-time-slot"><label></label><input type="time" name="posting_times" step="60" required><button class="secondary posting-time-pick" type="button">Chọn giờ</button></div></template>
-      <div class="posting-settings-scan"><div><strong>Tìm báo và repo mới</strong><p>Hermes bắt đầu quét lúc 00:00 giờ Bangkok mỗi ngày khi máy đang chạy, chọn và chuẩn bị tối đa {{ posting_settings.posts_per_day }} bài cho các giờ đăng hôm đó. Nếu máy tắt lúc nửa đêm, lượt quét chạy bù khi Hermes hoạt động lại. Bạn cũng có thể quét thủ công bất cứ lúc nào.</p></div><form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tìm bài mới</button></form></div>
+      <div class="posting-settings-scan"><div><strong>Tìm báo và repo mới · {{ 'Hermes tìm web đang bật' if web_research_enabled else 'Hermes tìm web chưa bật' }}</strong><p>Hermes quét nguồn đang bật và, khi bật tìm web, chủ động tìm thêm tin gốc lúc 00:00 giờ Bangkok mỗi ngày. Hệ thống chỉ nhận bài có URL và ngày công bố xác minh được, rồi chọn và chuẩn bị tối đa {{ posting_settings.posts_per_day }} bài. Nếu máy tắt lúc nửa đêm, lượt tìm chạy bù khi Hermes hoạt động lại. Nút bên cạnh tìm thủ công mà không chiếm lượt tự động.</p></div><form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tìm bài mới</button></form></div>
     </div>
   </section>
 

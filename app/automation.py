@@ -7,7 +7,7 @@ import logging
 import os
 import re
 
-from . import database, discovery, llm, media, queue, research, video
+from . import database, discovery, hermes_research, llm, media, queue, research, video
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -72,7 +72,7 @@ def prepare_articles(path: Path, now: datetime) -> int:
                 image_paths = media.post_image_paths(path, post_id)
             body = llm.write_draft(article["title"], article["summary"], article["url"], post["source_kind"])
             comment = llm.write_first_comment(article["title"], article["summary"], article["url"], body)
-            if post["source_kind"] != "github" and not post["video_url"]:
+            if post["source_kind"] not in {"github", "hermes_github"} and not post["video_url"]:
                 try:
                     found_video = video.find_relevant_video(article["url"], article["title"], article["summary"])
                     if found_video:
@@ -178,8 +178,17 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
         result["found"], errors = discovery.scan_sources(path)
         for error in errors:
             logging.warning("Automatic source scan: %s", error)
+        if hermes_research.enabled():
+            try:
+                found, errors = hermes_research.find_articles(path, now, daily_target)
+                result["found"] += found
+                result["reviewed"] += found
+                for error in errors:
+                    logging.warning("Hermes research: %s", error)
+            except Exception as exc:
+                logging.warning("Hermes research failed; keeping curated sources: %s", type(exc).__name__)
         if os.environ.get("REUP_LLM_MODEL", "").strip():
-            result["reviewed"] = research.review_candidates(path, now, daily_target)["reviewed"]
+            result["reviewed"] += research.review_candidates(path, now, daily_target)["reviewed"]
     result["prepared"] = prepare_articles(path, now)
     result["scheduled"] = schedule_ready(path, now)
     return result

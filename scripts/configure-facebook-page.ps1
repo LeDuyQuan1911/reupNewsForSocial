@@ -4,19 +4,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot (Split-Path -Parent $PSScriptRoot)
 if ($Check -and $FromUserToken) {
     throw 'Chọn -Check hoặc -FromUserToken, không dùng cả hai cùng lúc.'
 }
 
 if ($Check) {
-    if ([Environment]::GetEnvironmentVariable('REUP_FACEBOOK_AUTH_MODE', 'User') -eq 'system_user') {
+    if ($env:REUP_FACEBOOK_AUTH_MODE -eq 'system_user') {
         throw 'Máy đang dùng System User. Chạy configure-facebook-system-user.ps1 -Check.'
     }
-    $pageId = [Environment]::GetEnvironmentVariable('REUP_FACEBOOK_PAGE_ID', 'User')
-    $version = [Environment]::GetEnvironmentVariable('REUP_META_GRAPH_VERSION', 'User')
-    $token = [Environment]::GetEnvironmentVariable('REUP_FACEBOOK_PAGE_TOKEN', 'User')
+    $pageId = $env:REUP_FACEBOOK_PAGE_ID
+    $version = $env:REUP_META_GRAPH_VERSION
+    $token = $env:REUP_FACEBOOK_PAGE_TOKEN
     if (-not $pageId -or -not $version -or -not $token) {
-        throw 'Chưa có đủ Page ID, Page token và phiên bản Graph API trong biến môi trường User.'
+        throw 'Chưa có đủ Page ID, Page token và phiên bản Graph API trong .env hoặc biến môi trường User.'
     }
 } elseif ($FromUserToken) {
     $pageId = [Environment]::GetEnvironmentVariable('REUP_FACEBOOK_PAGE_ID', 'User')

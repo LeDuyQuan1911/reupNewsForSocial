@@ -68,7 +68,7 @@ def _github_readme(url: str) -> str:
 
 def source_excerpt(url: str, kind: str) -> str:
     """Read only public HTTPS source content; callers may fall back to feed metadata."""
-    if kind == "github":
+    if kind in {"github", "hermes_github"}:
         return _github_readme(url)
     raw, _ = fetch_public_bytes(url, MAX_PAGE_BYTES)
     parser = ArticleTextParser()

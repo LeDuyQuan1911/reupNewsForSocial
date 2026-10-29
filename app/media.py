@@ -334,7 +334,7 @@ def prepare_post_image(database_path: Path, post_id: int, append: bool = False) 
                 used_hashes.add(hashlib.sha256(post_image_path(database_path, image, post_id).read_bytes()).digest())
             except MissingImageError:
                 continue
-    kind = "repo_asset" if post["source_kind"] == "github" else "source"
+    kind = "repo_asset" if post["source_kind"] in {"github", "hermes_github"} else "source"
     candidates = []
     if kind == "source" and post["article_image_url"]:
         candidates.append(urljoin(post["article_url"], post["article_image_url"]))

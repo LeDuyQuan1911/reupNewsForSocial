@@ -1,10 +1,12 @@
-from app.web import create_app
-from app.queue import process_due_posts
-from app.automation import run_cycle
 from pathlib import Path
 from threading import Thread
 import time
 import logging
+
+from app.local_env import load_local_env
+from app.web import create_app
+from app.queue import process_due_posts
+from app.automation import run_cycle
 
 
 def hermes_owns_automation(path: Path) -> bool:
@@ -34,6 +36,7 @@ def run_automation(path: Path):
 
 
 if __name__ == "__main__":
+    load_local_env(Path(__file__).resolve().parent)
     app = create_app()
     if not hermes_owns_automation(app.config["DATABASE_PATH"]):
         Thread(target=run_scheduler, args=(app.config["DATABASE_PATH"],), daemon=True).start()

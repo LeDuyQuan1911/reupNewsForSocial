@@ -232,6 +232,21 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(review.call_count, 3)
         self.assertTrue(all(call.args[2] == 2 for call in review.call_args_list))
 
+    def test_daily_cycle_includes_hermes_web_results_and_keeps_curated_scan(self):
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_HERMES_DISCOVERY_ENABLED": "1",
+                    "REUP_LLM_MODEL": "test-text"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", return_value=(3, [])) as scan, \
+             patch("app.automation.hermes_research.find_articles", return_value=(2, [])) as web, \
+             patch("app.automation.research.review_candidates", return_value={"reviewed": 5}), \
+             patch("app.automation.prepare_articles", return_value=0), \
+             patch("app.automation.schedule_ready", return_value=0):
+            result = automation.run_cycle(self.path, self.now)
+        self.assertEqual(result["found"], 5)
+        self.assertEqual(result["reviewed"], 7)
+        scan.assert_called_once()
+        web.assert_called_once()
+
     def test_research_picks_do_not_exceed_daily_target(self):
         candidates = [{"id": index} for index in range(1, 4)]
         raw = '{"picks": [' + ', '.join(

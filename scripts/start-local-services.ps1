@@ -1,17 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-
-foreach ($name in @(
-    'REUP_LLM_BASE_URL', 'REUP_LLM_MODEL', 'REUP_LLM_VISION_MODEL', 'REUP_LLM_IMAGE_MODEL', 'REUP_LLM_API_KEY',
-    'REUP_AUTO_ENABLED', 'REUP_FACEBOOK_PAGE_ID', 'REUP_FACEBOOK_PAGE_NAME', 'REUP_FACEBOOK_PAGE_NAME_ID', 'REUP_FACEBOOK_PAGE_TOKEN',
-    'REUP_FACEBOOK_AUTH_MODE', 'REUP_FACEBOOK_SYSTEM_USER_TOKEN',
-    'REUP_META_GRAPH_VERSION', 'REUP_SECRET_KEY'
-)) {
-    $value = [Environment]::GetEnvironmentVariable($name, 'User')
-    if ($value) {
-        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-    }
-}
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $root
 
 $router = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 20128 -State Listen -ErrorAction SilentlyContinue
 if (-not $router) {

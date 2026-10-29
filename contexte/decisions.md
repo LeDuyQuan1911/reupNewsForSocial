@@ -242,3 +242,18 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: giữ dashboard trong chế độ bảo trì khi có `data/deployment-paused`, chỉ cho `/healthz` phản hồi. Bắt đầu thử `hermes cron resume` là ranh giới sau đó không tự phục hồi DB; nếu lỗi, giữ bảo trì để chủ dự án đối chiếu trạng thái thực tế.
 - Lý do: trạng thái đăng bài sau thời điểm đó có thể đã đổi trên Facebook; ghi đè DB cũ tạo nguy cơ đăng trùng.
 - Hệ quả / khi nào xem lại: cần thao tác phục hồi thủ công nếu lỗi sau ranh giới này; kiểm chứng end-to-end trên server Windows khi cài máy.
+
+### 2026-10-28 — Hermes chủ động tìm tin ngoài nguồn cấu hình
+
+- Bối cảnh: luồng cũ chỉ quét nguồn cố định rồi model xếp hạng metadata; chủ dự án muốn Hermes tự tìm thêm tin và nhận đủ ngữ cảnh biên tập.
+- Quyết định: giữ cron `--no-agent` để xử lý lịch theo phút, nhưng ở lượt tìm hằng ngày gọi riêng Hermes với toolset `web`, brief nghiên cứu, giới hạn số vòng công cụ và timeout cục bộ. Hermes trả JSON URL gốc và lý do chọn; ứng dụng kiểm tra lại URL HTTPS công khai, tiêu đề, tóm tắt, ngày công bố trong 48 giờ rồi mới lưu. Bài từ Hermes giữ phương pháp đánh giá riêng; nguồn cũ tiếp tục chạy khi Hermes lỗi. Bật bằng biến môi trường User `REUP_HERMES_DISCOVERY_ENABLED=1`.
+- Lý do: Hermes có thể nghiên cứu rộng hơn mà không giao quyền sửa file, chạy terminal hoặc trực tiếp đăng Page trong lượt tìm. Kiểm tra độc lập giảm rủi ro link bịa, tin cũ hoặc nguồn bị tạm dừng.
+- Hệ quả / khi nào xem lại: phụ thuộc web search backend của Hermes và khả năng tool calling của model 9Router; trang thiếu metadata ngày sẽ không được nhận. Chưa đối chiếu toàn văn qua nhiều nguồn.
+# Cấu hình runtime theo máy
+
+### 2026-10-29 — Ưu tiên `.env` cục bộ
+
+- Bối cảnh: chuyển hệ thống sang Windows server bằng các biến môi trường User gây khó thao tác và dễ lệch cấu hình giữa hai máy.
+- Quyết định: dashboard và Hermes runner đọc `.env` ở gốc repo; script PowerShell nạp biến User cũ trước rồi để `.env` ghi đè trong tiến trình. Chỉ chấp nhận khóa `REUP_*` theo cú pháp `KEY=VALUE`; file không được commit.
+- Lý do: mỗi máy có thể giữ key/token riêng và cập nhật bằng một file cục bộ mà không cần chỉnh Windows User environment.
+- Hệ quả: khi sửa `.env` cần khởi động lại dashboard/gateway để các tiến trình đang chạy nhận giá trị mới. Script cấu hình Facebook cũ vẫn có thể ghi User environment; nếu `.env` đã đặt biến tương ứng thì giá trị trong file được dùng khi chạy.

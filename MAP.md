@@ -40,7 +40,10 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `scripts/cd/install-updater.ps1` | Cài Scheduled Task kiểm tra bản mới mỗi 5 phút bằng tài khoản sở hữu Hermes |
 | `scripts/cd/backup_db.py`, `scripts/cd/smoke.py` | Sao lưu/phục hồi SQLite và kiểm tra ứng dụng bằng DB tạm |
 | `docs/deployment.md` | Quy trình kích hoạt CI gate và cài CD trên máy server Windows |
+| `docs/research-brief.md` | Ngữ cảnh và đầu ra có cấu trúc cho lượt Hermes tìm tin trên web |
+| `app/hermes_research.py` | Gọi Hermes chỉ với công cụ web và xác minh URL, ngày đăng, metadata bài gốc trước khi lưu |
 | `run.py` | Chạy dashboard Flask trên `127.0.0.1:5000` |
+| `app/local_env.py`, `scripts/load-env.ps1` | Nạp `.env` tại repo vào tiến trình dashboard/Hermes, ưu tiên giá trị file hơn môi trường User cũ |
 | `scripts/start-local-services.ps1` | Khởi động 9Router, bảo đảm Hermes gateway sẵn sàng nếu repo đã giao lịch tự động, rồi mở dashboard; dùng cho tác vụ đăng nhập Windows |
 | `scripts/setup-hermes.ps1` | Dùng installer vendored để cài bản Hermes cố định trên Windows và cấu hình endpoint/model 9Router từ biến môi trường |
 | `scripts/start-hermes.ps1` | Mở Hermes tại thư mục repo để tự nạp ngữ cảnh biên tập trong `AGENTS.md` |
@@ -77,7 +80,7 @@ Trạng thái: khung làm việc cho agent và dashboard đọc RSS/Atom cục b
 | `app/templates/posts.html`, `post.html` | Danh sách bài đăng và trang biên tập |
 | `app/templates/sources.html`, `account.html` | Quản lý nguồn tin và trạng thái kết nối |
 | `app/templates/facebook.html`, `app/static/facebook.css` | Hướng dẫn kết nối Page trước, rồi quản lý nhóm đích dự kiến |
-| `.env.example` | Tên biến môi trường cho LLM và Facebook Page |
+| `.env.example` | Mẫu cấu hình cho `.env` cục bộ; `.env` được Git bỏ qua |
 | `tests/test_app.py` | Kiểm tra parser, chống trùng và route cơ bản |
 | `data/reup.sqlite3` | Dữ liệu cục bộ, được Git bỏ qua |
 
