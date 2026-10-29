@@ -2,6 +2,8 @@
 
 ## Đã xong
 
+- [x] Cho Windows CD nhận tiến trình Python con của `.venv` là chủ cổng dashboard, dừng cả launcher và con khi cập nhật, chờ đủ thời gian health check.
+
 - [x] Sửa release gate CD để nhận cả hai dạng `path` workflow GitHub API và giữ nguyên điều kiện CI push đúng commit `main`.
 
 - [x] Sửa mã hóa các script PowerShell tiếng Việt để Windows PowerShell 5.1 parse được; thêm kiểm tra hồi quy trong bộ test Windows.
