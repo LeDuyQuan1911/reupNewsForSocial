@@ -251,6 +251,13 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Hệ quả / khi nào xem lại: phụ thuộc web search backend của Hermes và khả năng tool calling của model 9Router; trang thiếu metadata ngày sẽ không được nhận. Chưa đối chiếu toàn văn qua nhiều nguồn.
 # Cấu hình runtime theo máy
 
+### 2026-10-29 — Nhận diện workflow CI theo GitHub API
+
+- Bối cảnh: GitHub API trên commit `main` trả `path=.github/workflows/ci.yml` không có hậu tố `@refs/...`; release gate cũ từ chối CI đã xanh nên server không mở dashboard.
+- Quyết định: chỉ nhận đúng `.github/workflows/ci.yml` hoặc cùng đường dẫn có hậu tố `@...`, đồng thời giữ nguyên điều kiện SHA, branch `main`, event `push`, lượt chạy mới nhất và kết quả success.
+- Lý do: cho phép hai dạng đường dẫn API mà không nhận workflow khác hoặc bỏ qua CI.
+- Hệ quả: kiểm tra cả hai dạng bằng unit test; server vẫn phải chờ commit sửa gate được merge và CI push thành công.
+
 ### 2026-10-29 — PowerShell 5.1 cần UTF-8 BOM cho script tiếng Việt
 
 - Bối cảnh: máy server chỉ có Windows PowerShell 5.1; `install-hermes-automation.ps1` chứa tiếng Việt UTF-8 không BOM nên parser đọc sai và dừng trước khi cài cron.
