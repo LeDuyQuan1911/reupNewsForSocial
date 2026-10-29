@@ -8,17 +8,11 @@ $ErrorActionPreference = 'Stop'
 $hermesCommit = 'bf0203a794a07aac3ff764972ab9087baa4e4f4e'
 $installerSha256 = '82781C63BEF90920CEB41A075B69FF5994D12AC1F11606D0B572573FDF515FC2'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $repoRoot
 $installer = Join-Path $repoRoot 'vendor\hermes-agent\scripts\install.ps1'
 $hermesHome = Join-Path $env:LOCALAPPDATA 'hermes'
 $sourceDir = Join-Path $hermesHome 'hermes-agent'
 $hermes = Join-Path $hermesHome 'bin\hermes.exe'
-
-foreach ($name in @('REUP_LLM_BASE_URL', 'REUP_LLM_MODEL', 'REUP_LLM_API_KEY')) {
-    if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
-        $userValue = [Environment]::GetEnvironmentVariable($name, 'User')
-        if ($userValue) { [Environment]::SetEnvironmentVariable($name, $userValue, 'Process') }
-    }
-}
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw 'Git is required to install and verify Hermes.'

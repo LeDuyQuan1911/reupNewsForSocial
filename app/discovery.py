@@ -9,6 +9,8 @@ def scan_sources(path: Path) -> tuple[int, list[str]]:
     added = 0
     errors = []
     for source in database.list_sources(path, active_only=True):
+        if source["kind"].startswith("hermes"):
+            continue
         try:
             if source["kind"] == "github":
                 articles = github.fetch_popular_repositories()

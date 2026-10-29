@@ -3,11 +3,11 @@
 {% block content %}
 <div class="source-layout">
   <section class="panel source-panel" aria-labelledby="sources-title">
-    <div class="section-heading"><div><h1 id="sources-title">Nguồn thông tin</h1><p>{{ active_count }} nguồn đang quét, {{ sources|length - active_count }} nguồn tạm dừng.</p></div><span class="count">{{ sources|length }} nguồn</span></div>
+    <div class="section-heading"><div><h1 id="sources-title">Nguồn thông tin</h1><p>{{ active_count }} nguồn đang bật, {{ sources|length - active_count }} nguồn tạm dừng.</p></div><span class="count">{{ sources|length }} nguồn</span></div>
     {% if sources %}<div class="source-rows">{% for source in sources %}
       <div class="source-row {{ 'is-paused' if not source.active else '' }}">
         <span class="source-dot" aria-hidden="true"></span>
-        <div class="source-info"><strong>{{ source.name }}</strong><small>{{ {'rss':'RSS/Atom','anthropic':'Trang tin','github':'GitHub'}.get(source.kind, source.kind) }} · {{ 'Đang quét' if source.active else 'Tạm dừng' }}</small><a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>{% if source.last_error %}<small class="source-error">Quét lỗi: {{ source.last_error }}</small>{% elif source.last_checked_at %}<small class="source-checked">Quét gần nhất: {{ source.last_checked_at|bangkok_time }}</small>{% else %}<small class="source-checked">Chưa quét nguồn này</small>{% endif %}</div>
+        <div class="source-info"><strong>{{ source.name }}</strong><small>{{ {'rss':'RSS/Atom','anthropic':'Trang tin','github':'GitHub','hermes':'Hermes tìm web','hermes_github':'Hermes tìm repo'}.get(source.kind, source.kind) }} · {{ 'Đang bật' if source.active else 'Tạm dừng' }}</small><a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.url }}</a>{% if source.kind.startswith('hermes') %}<small class="source-checked">Hermes có thể tìm bài mới từ miền này; không quét RSS tự động.</small>{% elif source.last_error %}<small class="source-error">Quét lỗi: {{ source.last_error }}</small>{% elif source.last_checked_at %}<small class="source-checked">Quét gần nhất: {{ source.last_checked_at|bangkok_time }}</small>{% else %}<small class="source-checked">Chưa quét nguồn này</small>{% endif %}</div>
         <form action="{{ url_for('toggle_source', source_id=source.id) }}" method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="active" value="{{ '0' if source.active else '1' }}">
@@ -19,7 +19,7 @@
   </section>
   <aside class="panel source-add" aria-labelledby="add-source-title">
     <div class="section-heading"><h2 id="add-source-title">Thêm nguồn RSS hoặc Atom</h2></div>
-    <p class="source-add-help">Hệ thống quét nguồn đang bật mỗi giờ khi tự động hóa hoạt động. Tạm dừng sẽ giữ tin cũ, ngừng chọn bài mới từ nguồn này; lịch đã đặt vẫn giữ nguyên.</p>
+    <p class="source-add-help">Hệ thống quét RSS đang bật mỗi ngày khi tự động hóa hoạt động. Hermes có thể đề xuất bài ngoài danh sách RSS; tạm dừng một miền sẽ giữ tin cũ và ngừng nhận bài mới từ miền đó. Lịch đã đặt vẫn giữ nguyên.</p>
     <form class="add-source" action="{{ url_for('add_source') }}" method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label for="source-name">Tên nguồn</label><input id="source-name" name="name" placeholder="Ví dụ: Báo công nghệ…" autocomplete="off" required maxlength="100">

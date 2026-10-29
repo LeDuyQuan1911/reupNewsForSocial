@@ -2,6 +2,10 @@
 
 ## Đã xong
 
+- [x] Nạp `.env` cục bộ cho dashboard, Hermes runner và các script khởi động/kiểm tra kết nối; giữ biến User cũ làm đường tương thích và không đưa secret vào Git.
+
+- [x] Nối Hermes web search vào lượt tìm tự động và nút tìm thủ công; nạp brief nghiên cứu theo yêu cầu chủ dự án, kiểm tra lại metadata nguồn gốc trước khi lưu và giữ nguồn RSS/GitHub làm dự phòng.
+
 - [x] Chuẩn bị script CD cho server Windows: gate CI theo đúng SHA `main`, tạm dừng Hermes, sao lưu SQLite, kiểm tra dashboard, phục hồi khi lỗi; thêm hướng dẫn cài Scheduled Task tự kéo bản mới mỗi 5 phút. Chưa kích hoạt trên máy server.
 
 - [x] Đẩy nhánh CI/CD và mở PR #3; kiểm tra workflow Windows xanh trên PR, bật ruleset #25950396 để yêu cầu check `Python tests (Windows)` trước khi merge vào `main`.

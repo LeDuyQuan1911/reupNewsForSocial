@@ -12,6 +12,10 @@ Trạng thái: **đang phát triển từng bước**. Stack cục bộ đã ch�
 
 ## Yêu cầu đã xác nhận
 
+- Dashboard, Hermes runner và script khởi động đọc cấu hình từ `.env` cục bộ ở thư mục repo để chuyển máy dễ hơn. `.env` chứa key/token thật chỉ nằm trên từng máy và bị Git bỏ qua; `.env.example` chỉ có giá trị mẫu. Khi có cả `.env` và biến môi trường User, `.env` được ưu tiên.
+
+- Hermes chủ động tìm bài mới ngoài các nguồn RSS/GitHub đang cấu hình trong lượt tìm hằng ngày và khi bấm nút tìm thủ công. Hermes nhận ngữ cảnh biên tập của chủ dự án, dùng công cụ web để đề xuất URL gốc theo thứ tự ưu tiên. Ứng dụng tải lại trang gốc, kiểm tra HTTPS công khai, tiêu đề, tóm tắt và ngày công bố trong 48 giờ trước khi lưu; đề xuất không đạt bị bỏ qua. Nguồn cũ tiếp tục được quét khi Hermes hoặc web search lỗi. Không mặc nhiên coi kết quả này là đã xác minh toàn văn hay độ tin cậy của mọi chi tiết.
+
 - Trước khi chuyển code sang máy chỉ chạy server, PR và commit mới trên `main` phải được kiểm tra trong CI tách biệt trên Windows. Job kiểm thử không nhận token thật, không bật Hermes cron hoặc gửi Facebook; dùng dữ liệu SQLite tạm và giả lập các thao tác đăng Page. Máy server Windows tự kiểm tra `main` mỗi 5 phút và chỉ triển khai đúng commit có lượt CI `push` thành công. Trước cập nhật cần tạm dừng Hermes, sao lưu SQLite; nếu kiểm tra khởi động lỗi, khôi phục bản cũ. Script CD đã nằm trong repo nhưng chỉ hoạt động sau khi cài trên máy server.
 
 - Bản nháp mới từ nguồn hiện có cần thử đọc trích đoạn bài gốc hoặc README GitHub trước khi LLM viết lại; không suy diễn ngoài dữ kiện đã đọc. Nếu trang nguồn từ chối truy cập, chỉ dùng tiêu đề/tóm tắt hiện có. Ảnh repo ưu tiên demo/screenshot sản phẩm trong README rồi mới chụp repo. Reddit và Threads là hướng mở rộng sau, chưa nằm trong luồng quét hiện tại.

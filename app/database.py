@@ -4,6 +4,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 
@@ -242,6 +243,33 @@ def save_posting_settings(path: Path, count_value: str, times_value: str) -> dic
 def add_source(path: Path, name: str, url: str) -> None:
     with connect(path) as db:
         db.execute("INSERT INTO sources (name, url) VALUES (?, ?)", (name, url))
+
+
+def save_hermes_article(path: Path, article: dict[str, str], is_repo: bool) -> tuple[int, bool]:
+    """Store only a verified original, respecting paused sources on the same host."""
+    host = (urlsplit(article["url"]).hostname or "").lower()
+    if not host:
+        raise ValueError("URL bài gốc không có miền")
+    source_url = f"https://{host}/"
+    with connect(path) as db:
+        for row in db.execute("SELECT url, active FROM sources"):
+            other_host = (urlsplit(row["url"]).hostname or "").lower()
+            if not row["active"] and other_host.removeprefix("www.") == host.removeprefix("www."):
+                raise ValueError("Nguồn này đang tạm dừng")
+        db.execute("INSERT OR IGNORE INTO sources (name, url, kind) VALUES (?, ?, ?)",
+                   (host, source_url, "hermes_github" if is_repo else "hermes"))
+        source = db.execute("SELECT id, active FROM sources WHERE url = ?", (source_url,)).fetchone()
+        if not source or not source["active"]:
+            raise ValueError("Nguồn này đang tạm dừng")
+        before = db.total_changes
+        db.execute("""INSERT OR IGNORE INTO articles
+                   (source_id, title, url, summary, published_at, image_url)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (source["id"], article["title"], article["url"], article["summary"],
+                    article["published_at"], article.get("image_url", "")))
+        created = db.total_changes > before
+        article_id = db.execute("SELECT id FROM articles WHERE url = ?", (article["url"],)).fetchone()[0]
+        return article_id, created
 
 
 def add_facebook_group(path: Path, name: str, url: str) -> None:

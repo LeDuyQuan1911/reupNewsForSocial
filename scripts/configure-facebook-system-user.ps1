@@ -1,19 +1,21 @@
 ﻿param([switch]$Check)
 
 $ErrorActionPreference = 'Stop'
-$pageId = [Environment]::GetEnvironmentVariable('REUP_FACEBOOK_PAGE_ID', 'User')
+$repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $repoRoot
+$pageId = $env:REUP_FACEBOOK_PAGE_ID
 if (-not $pageId) { $pageId = (Read-Host 'Facebook Page ID').Trim() }
-$version = [Environment]::GetEnvironmentVariable('REUP_META_GRAPH_VERSION', 'User')
+$version = $env:REUP_META_GRAPH_VERSION
 if (-not $version) { $version = (Read-Host 'Graph API version (dạng vN.N)').Trim() }
 if ($pageId -notmatch '^\d+$' -or $version -notmatch '^v\d+\.\d+$') {
     throw 'Page ID hoặc phiên bản Graph API không hợp lệ.'
 }
 
 if ($Check) {
-    if ([Environment]::GetEnvironmentVariable('REUP_FACEBOOK_AUTH_MODE', 'User') -ne 'system_user') {
+    if ($env:REUP_FACEBOOK_AUTH_MODE -ne 'system_user') {
         throw 'Máy này chưa chọn chế độ System User.'
     }
-    $systemToken = [Environment]::GetEnvironmentVariable('REUP_FACEBOOK_SYSTEM_USER_TOKEN', 'User')
+    $systemToken = $env:REUP_FACEBOOK_SYSTEM_USER_TOKEN
 } else {
     $secureToken = Read-Host 'System User access token (đầu vào được ẩn)' -AsSecureString
     $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)

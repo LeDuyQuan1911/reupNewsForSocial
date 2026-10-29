@@ -4,21 +4,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'load-env.ps1') -RepoRoot $repoRoot
 $hermes = Join-Path $env:LOCALAPPDATA 'hermes\bin\hermes.exe'
 
 if (-not (Test-Path -LiteralPath $hermes)) {
     throw 'Hermes chưa được cài. Chạy scripts/setup-hermes.ps1 trước.'
 }
 
-foreach ($name in @('REUP_LLM_BASE_URL', 'REUP_LLM_MODEL', 'REUP_LLM_API_KEY')) {
-    if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
-        $value = [Environment]::GetEnvironmentVariable($name, 'User')
-        if ($value) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') }
-    }
-}
-
 if (-not $env:REUP_LLM_API_KEY) {
-    throw 'REUP_LLM_API_KEY chưa có trong biến môi trường User.'
+    throw 'Thiếu REUP_LLM_API_KEY trong .env hoặc biến môi trường User.'
 }
 
 if ($Prompt) {

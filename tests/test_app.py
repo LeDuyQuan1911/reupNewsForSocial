@@ -483,6 +483,16 @@ class DashboardTests(unittest.TestCase):
         scan.assert_called_once_with(self.db_path)
         self.assertEqual(response.location, "/articles")
 
+    def test_manual_discovery_uses_hermes_web_when_enabled(self):
+        with patch.dict(os.environ, {"REUP_HERMES_DISCOVERY_ENABLED": "1"}), \
+             patch("app.web.discovery.scan_sources", return_value=(1, [])) as scan, \
+             patch("app.web.hermes_research.find_articles", return_value=(2, [])) as web:
+            response = self.client.post("/discover", data={"csrf_token": self.csrf})
+        self.assertEqual(response.location, "/articles")
+        scan.assert_called_once_with(self.db_path)
+        web.assert_called_once()
+        self.assertEqual(web.call_args.args[2], database.get_posting_settings(self.db_path)["posts_per_day"])
+
     def test_hermes_controls_require_csrf_and_use_fixed_actions(self):
         with patch("app.web.hermes_control.snapshot", return_value={
             "gateway_running": True, "job_state": "active", "runs": [], "error": None,

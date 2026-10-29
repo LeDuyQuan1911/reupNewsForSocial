@@ -7,6 +7,10 @@ from app import hermes_writer
 
 
 class HermesWriterTests(unittest.TestCase):
+    def test_strips_cli_session_prefix_from_draft(self):
+        raw = "session_id: local-" + "a" * 64 + "💡 Nội dung bài"
+        self.assertEqual(hermes_writer._clean_cli_output(raw), "💡 Nội dung bài")
+
     def test_passes_editorial_context_to_hermes_stdin(self):
         settings = {"REUP_LLM_MODEL": "test-model", "REUP_LLM_API_KEY": "test-only"}
         output = subprocess.CompletedProcess([], 0, "💡 Bài nháp\n\n#AI #Tech", "")
