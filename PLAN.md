@@ -2,6 +2,8 @@
 
 ## Đã xong
 
+- [x] Sửa release gate CD để nhận cả hai dạng `path` workflow GitHub API và giữ nguyên điều kiện CI push đúng commit `main`.
+
 - [x] Sửa mã hóa các script PowerShell tiếng Việt để Windows PowerShell 5.1 parse được; thêm kiểm tra hồi quy trong bộ test Windows.
 
 - [x] Nạp `.env` cục bộ cho dashboard, Hermes runner và các script khởi động/kiểm tra kết nối; giữ biến User cũ làm đường tương thích và không đưa secret vào Git.

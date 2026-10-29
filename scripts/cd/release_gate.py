@@ -13,11 +13,16 @@ REPOSITORY = "LeDuyQuan1911/reupNewsForSocial"
 WORKFLOW = "ci.yml"
 
 
+def is_ci_workflow(path: str) -> bool:
+    expected = f".github/workflows/{WORKFLOW}"
+    return path == expected or path.startswith(expected + "@")
+
+
 def eligible(runs: list[dict], sha: str) -> bool:
     """A later failed rerun must revoke an earlier successful run."""
     matches = [run for run in runs if run.get("head_sha") == sha
                and run.get("head_branch") == "main" and run.get("event") == "push"
-               and run.get("path", "").startswith(".github/workflows/ci.yml@")]
+               and is_ci_workflow(run.get("path", ""))]
     if not matches:
         return False
     latest = max(matches, key=lambda run: (run.get("run_number", 0), run.get("run_attempt", 0)))

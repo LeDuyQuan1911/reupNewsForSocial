@@ -15,7 +15,7 @@ class ReleaseGateTests(unittest.TestCase):
 
     def run_record(self, **changes):
         record = {"head_sha": self.SHA, "head_branch": "main", "event": "push",
-                  "path": ".github/workflows/ci.yml@refs/heads/main",
+                  "path": ".github/workflows/ci.yml",
                   "run_number": 4, "run_attempt": 1, "status": "completed", "conclusion": "success"}
         record.update(changes)
         return record
@@ -32,6 +32,15 @@ class ReleaseGateTests(unittest.TestCase):
         runs = [self.run_record(run_attempt=1),
                 self.run_record(run_attempt=2, conclusion="failure")]
         self.assertFalse(release_gate.eligible(runs, self.SHA))
+
+    def test_workflow_path_accepts_api_formats_without_other_workflows(self):
+        self.assertTrue(release_gate.eligible([self.run_record(path=".github/workflows/ci.yml")], self.SHA))
+        self.assertTrue(release_gate.eligible([
+            self.run_record(path=".github/workflows/ci.yml@refs/heads/main")
+        ], self.SHA))
+        self.assertFalse(release_gate.eligible([
+            self.run_record(path=".github/workflows/ci.yml.backup")
+        ], self.SHA))
 
 
 if __name__ == "__main__":
