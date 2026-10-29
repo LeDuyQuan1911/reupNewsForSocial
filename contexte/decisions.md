@@ -251,6 +251,13 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Hệ quả / khi nào xem lại: phụ thuộc web search backend của Hermes và khả năng tool calling của model 9Router; trang thiếu metadata ngày sẽ không được nhận. Chưa đối chiếu toàn văn qua nhiều nguồn.
 # Cấu hình runtime theo máy
 
+### 2026-10-29 — PID launcher và tiến trình con dashboard trên Windows
+
+- Bối cảnh: `Start-Process` với Python trong `.venv` trả PID launcher, còn cổng Flask 5000 do tiến trình Python con giữ. Updater cũ yêu cầu PID trùng tuyệt đối nên báo health lỗi dù `/healthz` trả OK.
+- Quyết định: chấp nhận listener thuộc launcher hoặc tiến trình Python con trực tiếp có command line `run.py`; trước khi dừng, xác minh launcher nằm trong `.venv` và listener thuộc nhóm này. Dừng con trước launcher; kéo dài thời gian chờ health lên 60 lần.
+- Lý do: hỗ trợ cơ chế Python venv trên Windows mà vẫn không dừng tiến trình không thuộc dashboard do updater quản lý.
+- Hệ quả: cần kiểm chứng triển khai thực tế trên server sau khi CI/merge; updater không thay đổi các dữ liệu `.env` hoặc SQLite ngoài quy trình backup hiện có.
+
 ### 2026-10-29 — Nhận diện workflow CI theo GitHub API
 
 - Bối cảnh: GitHub API trên commit `main` trả `path=.github/workflows/ci.yml` không có hậu tố `@refs/...`; release gate cũ từ chối CI đã xanh nên server không mở dashboard.

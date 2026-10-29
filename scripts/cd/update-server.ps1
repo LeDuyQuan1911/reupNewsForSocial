@@ -21,11 +21,17 @@ function Invoke-Git([string[]]$Arguments) {
     return $result
 }
 
+function Get-DashboardChildren([int]$ParentPid) {
+    @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentPid" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match '(^|[\\\s])run\.py(["\s]|$)' })
+}
+
 function Test-Dashboard {
     param([int]$ExpectedPid)
-    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
         $listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($listener -and $listener.OwningProcess -eq $ExpectedPid) {
+        $ownedPids = @($ExpectedPid) + @(Get-DashboardChildren -ParentPid $ExpectedPid | ForEach-Object { $_.ProcessId })
+        if ($listener -and $listener.OwningProcess -in $ownedPids) {
             try {
                 $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5000/healthz' -UseBasicParsing -TimeoutSec 3
                 if ($response.StatusCode -eq 200) { return $true }
@@ -45,6 +51,16 @@ function Stop-OwnedDashboard {
                 -not $process.ExecutablePath.StartsWith((Split-Path -Parent $python), [StringComparison]::OrdinalIgnoreCase)) {
                 throw 'Dashboard PID does not belong to this deployment; refusing to stop it.'
             }
+            $children = @(Get-DashboardChildren -ParentPid $serverPid)
+            $ownedPids = @($serverPid) + @($children | ForEach-Object { $_.ProcessId })
+            $listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($listener -and $listener.OwningProcess -notin $ownedPids) {
+                throw 'Port 5000 belongs to another process; refusing to stop it.'
+            }
+            foreach ($child in $children) {
+                Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
+                try { Wait-Process -Id $child.ProcessId -Timeout 15 -ErrorAction SilentlyContinue } catch { }
+            }
             Stop-Process -Id $serverPid -Force
             try { Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue } catch { }
         }
@@ -57,7 +73,10 @@ function Stop-OwnedDashboard {
 function Start-OwnedDashboard {
     $process = Start-Process -FilePath $python -ArgumentList @('-u', 'run.py') -WorkingDirectory $RepoRoot -PassThru -WindowStyle Hidden
     Set-Content -LiteralPath $pidFile -Value $process.Id -Encoding ascii
-    if (-not (Test-Dashboard -ExpectedPid $process.Id)) { throw 'Dashboard health check failed.' }
+    if (-not (Test-Dashboard -ExpectedPid $process.Id)) {
+        Stop-OwnedDashboard
+        throw 'Dashboard health check failed.'
+    }
 }
 
 if (-not (Test-Path -LiteralPath $python)) { throw 'Create .venv and install requirements on the server first.' }
