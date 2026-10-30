@@ -1,5 +1,9 @@
 # Kế hoạch
 
+## Đang làm
+
+- [ ] Triển khai bản sửa CD khi launcher Python tự thoát trên Windows, xác minh server cập nhật qua CI và bật lại Scheduled Task CD.
+
 ## Đã xong
 
 - [x] Xếp lịch từng bài tự động ngay khi đạt kiểm tra trong lượt Hermes, dùng thời gian hiện tại cho khung tiếp theo khi lượt viết kéo dài; vẫn quét lại bài `ready` ở cuối lượt.

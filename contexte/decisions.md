@@ -286,3 +286,10 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: dashboard và Hermes runner đọc `.env` ở gốc repo; script PowerShell nạp biến User cũ trước rồi để `.env` ghi đè trong tiến trình. Chỉ chấp nhận khóa `REUP_*` theo cú pháp `KEY=VALUE`; file không được commit.
 - Lý do: mỗi máy có thể giữ key/token riêng và cập nhật bằng một file cục bộ mà không cần chỉnh Windows User environment.
 - Hệ quả: khi sửa `.env` cần khởi động lại dashboard/gateway để các tiến trình đang chạy nhận giá trị mới. Script cấu hình Facebook cũ vẫn có thể ghi User environment; nếu `.env` đã đặt biến tương ứng thì giá trị trong file được dùng khi chạy.
+
+### 2026-10-31 — Dừng dashboard qua process handle trong CD Windows
+
+- Bối cảnh: trên server, launcher Python của `.venv` tự thoát sau khi CD dừng tiến trình con giữ cổng; lệnh dừng launcher theo PID trả lỗi và chặn deploy dù CI đã xanh.
+- Quyết định: mở handle của launcher và con sau khi xác minh PID và thời điểm tạo; dừng bằng handle đã xác minh, coi việc tự thoát là hoàn tất, và dừng triển khai khi CIM lỗi hoặc tiến trình vẫn sống.
+- Lý do: tránh coi launcher tự thoát là lỗi và tránh dừng nhầm tiến trình được Windows cấp lại cùng PID.
+- Hệ quả: test mô phỏng ba trường hợp, nhưng cần kiểm chứng CD thật trên server trước khi coi chu trình cập nhật hoàn tất.

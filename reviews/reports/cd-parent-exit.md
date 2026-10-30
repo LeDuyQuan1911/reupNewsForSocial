@@ -2,8 +2,8 @@
 
 - Reviewer: Codex
 - Ngày: 2026-10-31
-- Base / head: `2d02824daa848a703d2be2dba451cac2134fc0eb` / `488a82b7b7732a62f4cb639bdd79872b647b54af`
-- Vòng: độc lập
+- Base / head: `2d02824daa848a703d2be2dba451cac2134fc0eb` / `4f332e922af7f9ffd39b1d8e5594a7853c8e0ddb`
+- Vòng: độc lập, sau đó đối chiếu bản sửa
 - Trạng thái: hoàn tất
 
 ## Phạm vi và kiểm tra
@@ -11,6 +11,8 @@
 - File/luồng đã xem: diff của `scripts/cd/update-server.ps1` và `tests/test_cd_dashboard_stop.py`; toàn bộ hàm `Stop-OwnedDashboard`, lời gọi trong luồng triển khai và rollback, kiểm tra cổng 5000; yêu cầu tại `reviews/requests/cd-parent-exit.md`. Không đọc worklog hoặc giải thích của tác giả ở lượt này.
 - Lệnh đã chạy và kết quả: `python -m unittest discover -s tests -p test_cd_dashboard_stop.py -v` (1 test đạt); `python -m unittest discover -s tests -p test_powershell5_syntax.py -v` (1 test đạt). Chạy thêm mô phỏng PowerShell lấy hàm thật bằng AST: khi lần truy vấn CIM thứ hai không trả launcher còn sống, hàm trả về, xóa PID file; kiểm tra bổ sung báo lỗi `Launcher remains alive while stop returned`.
 - Phần chưa kiểm chứng: không chạy CD trên server thật và không tái hiện đua PID bằng tiến trình Windows thật.
+
+Ở lượt đối chiếu `4f332e92`, đã xem lại diff và source của `scripts/cd/update-server.ps1`, `tests/test_cd_dashboard_stop.py`. Chạy trên worktree tác giả tại đúng head: test dừng dashboard đạt 3/3 (launcher tự thoát, PID child tái sử dụng, lỗi CIM); test cú pháp PowerShell 5 đạt 1/1. Không sửa implementation.
 
 ## Phát hiện
 
@@ -36,8 +38,13 @@
 
 ## Đối chiếu sau phản hồi tác giả
 
-Chưa thực hiện.
+Hai phát hiện P2 trên được **rút lại đối với head `4f332e92`**:
+
+- CIM giờ dùng `-ErrorAction Stop` ở truy vấn launcher và child (`scripts/cd/update-server.ps1:25,68`), nên lỗi truy vấn dừng deployment và giữ PID file. Test mới xác nhận đường lỗi này.
+- `Get-VerifiedDashboardProcess` mở handle trước, so `StartTime` với `CreationDate`; `Stop-VerifiedDashboardProcess` gọi `Kill()` và `WaitForExit()` trên handle đã xác minh (`scripts/cd/update-server.ps1:29-47,78-88`). Điều này loại bỏ cửa sổ giữa lần kiểm tra và `Stop-Process -Id` của bản cũ. Test mới xác nhận PID child đã tái sử dụng bị từ chối.
+
+Không có phát hiện mới sau phạm vi kiểm tra nêu trên. Chưa chạy CD thật trên server; test dùng process giả và chưa mô phỏng launcher còn sống cần bị `Kill()` hoặc lỗi rollback.
 
 ## Kết luận cho chủ repo
 
-Đường launcher tự thoát được test mới xác nhận, nhưng hai nhánh trên chưa đáp ứng trọn vẹn điều kiện dừng khi launcher còn sống và bảo vệ PID tái sử dụng. Cần tác giả xử lý hoặc chứng minh điều kiện kích hoạt không thể xảy ra trong môi trường triển khai trước khi chủ repo quyết định merge.
+Với head `4f332e92`, hai rủi ro đã báo ở lượt đầu được xử lý ở source và kiểm tra bằng test. Rủi ro còn lại là hành vi thực tế trên server Windows và đường rollback chưa được thử trong lượt review này. Chủ repo quyết định merge.
