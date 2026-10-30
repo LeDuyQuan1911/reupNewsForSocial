@@ -249,6 +249,14 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: giữ cron `--no-agent` để xử lý lịch theo phút, nhưng ở lượt tìm hằng ngày gọi riêng Hermes với toolset `web`, brief nghiên cứu, giới hạn số vòng công cụ và timeout cục bộ. Hermes trả JSON URL gốc và lý do chọn; ứng dụng kiểm tra lại URL HTTPS công khai, tiêu đề, tóm tắt, ngày công bố trong 48 giờ rồi mới lưu. Bài từ Hermes giữ phương pháp đánh giá riêng; nguồn cũ tiếp tục chạy khi Hermes lỗi. Bật bằng biến môi trường User `REUP_HERMES_DISCOVERY_ENABLED=1`.
 - Lý do: Hermes có thể nghiên cứu rộng hơn mà không giao quyền sửa file, chạy terminal hoặc trực tiếp đăng Page trong lượt tìm. Kiểm tra độc lập giảm rủi ro link bịa, tin cũ hoặc nguồn bị tạm dừng.
 - Hệ quả / khi nào xem lại: phụ thuộc web search backend của Hermes và khả năng tool calling của model 9Router; trang thiếu metadata ngày sẽ không được nhận. Chưa đối chiếu toàn văn qua nhiều nguồn.
+
+### 2026-10-31 — Xếp lịch ngay khi từng bài tự động sẵn sàng
+
+- Bối cảnh: lượt Hermes chuẩn bị nhiều bài liên tiếp; bài đã đạt kiểm tra vẫn chưa có lịch cho đến khi toàn bộ lượt kết thúc, có thể bỏ lỡ giờ đăng đầu tiên.
+- Quyết định: sau mỗi bài đạt kiểm tra, thử xếp lịch ngay vào khung còn trống. Nếu bước này lỗi, giữ bài ở trạng thái sẵn sàng và thử lại cuối lượt. Dùng đồng hồ hiện tại khi chạy thật để không đặt lịch vào một giờ đã qua trong lượt dài. Đếm ID bài có automation job trong DB trước/sau lượt để số liệu vẫn đúng khi đồng bộ job lỗi tạm thời rồi được phục hồi, không tính bài người dùng tự hẹn.
+- Lý do: bài đã sẵn sàng không bị giữ lại bởi bài kế tiếp đang viết hoặc xử lý ảnh; vẫn giữ kiểm tra ảnh, bình luận và Page trước khi hẹn.
+- Hệ quả: lượt chuẩn bị có thêm các thao tác SQLite ngắn sau mỗi bài; cần kiểm tra CI và triển khai lên server qua CD sau khi chủ repo merge.
+
 # Cấu hình runtime theo máy
 
 ### 2026-10-29 — PID launcher và tiến trình con dashboard trên Windows

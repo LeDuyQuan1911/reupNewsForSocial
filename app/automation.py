@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import logging
 import os
 import re
+from typing import Callable
 
 from . import database, discovery, hermes_research, llm, media, queue, research, video
 
@@ -40,7 +41,7 @@ def daily_bounds(now: datetime) -> tuple[str, str]:
     return start.isoformat(), (start + timedelta(days=1)).isoformat()
 
 
-def prepare_articles(path: Path, now: datetime) -> int:
+def prepare_articles(path: Path, now: datetime, on_ready: Callable[[], None] | None = None) -> int:
     if not models_ready():
         return 0
     daily_limit = database.get_posting_settings(path)["posts_per_day"]
@@ -106,6 +107,8 @@ def prepare_articles(path: Path, now: datetime) -> int:
                     database.remove_post_image(path, post_id, image["id"])
                 database.finish_automation_job(path, article_id, "ready", post_id)
                 prepared += 1
+                if on_ready is not None:
+                    on_ready()
                 continue
             database.block_automation_draft(path, post_id, last_reason)
             database.finish_automation_job(path, article_id, "blocked", post_id, last_reason)
@@ -172,7 +175,19 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
     result = {"found": 0, "reviewed": 0, "prepared": 0, "scheduled": 0}
     if not enabled():
         return result
+    live_clock = now is None
     now = now or datetime.now(timezone.utc)
+    scheduled_before = database.scheduled_automation_post_ids(path)
+
+    def scheduling_now() -> datetime:
+        return datetime.now(timezone.utc) if live_clock else now
+
+    def schedule_new_ready() -> None:
+        try:
+            schedule_ready(path, scheduling_now())
+        except Exception:
+            logging.exception("Immediate scheduling failed; retrying at end of cycle")
+
     if database.claim_daily_automation_scan(path, now.isoformat()):
         daily_target = database.get_posting_settings(path)["posts_per_day"]
         result["found"], errors = discovery.scan_sources(path)
@@ -189,6 +204,7 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
                 logging.warning("Hermes research failed; keeping curated sources: %s", type(exc).__name__)
         if os.environ.get("REUP_LLM_MODEL", "").strip():
             result["reviewed"] += research.review_candidates(path, now, daily_target)["reviewed"]
-    result["prepared"] = prepare_articles(path, now)
-    result["scheduled"] = schedule_ready(path, now)
+    result["prepared"] = prepare_articles(path, now, on_ready=schedule_new_ready)
+    schedule_ready(path, scheduling_now())
+    result["scheduled"] = len(database.scheduled_automation_post_ids(path) - scheduled_before)
     return result

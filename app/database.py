@@ -1070,6 +1070,16 @@ def reserved_post_times(path: Path, after_iso: str) -> list[str]:
         )]
 
 
+def scheduled_automation_post_ids(path: Path) -> set[int]:
+    """Snapshot prepared-by-automation posts that have received a posting slot."""
+    with connect(path) as db:
+        return {row["id"] for row in db.execute(
+            "SELECT posts.id FROM posts JOIN automation_jobs ON automation_jobs.post_id = posts.id "
+            "WHERE posts.scheduled_at IS NOT NULL AND posts.test_only = 0 "
+            "AND posts.status IN ('scheduled', 'publishing', 'published')"
+        )}
+
+
 def automation_status(path: Path) -> dict:
     with connect(path) as db:
         state = db.execute("SELECT last_scan_at FROM automation_state WHERE id = 1").fetchone()
