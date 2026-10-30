@@ -22,8 +22,28 @@ function Invoke-Git([string[]]$Arguments) {
 }
 
 function Get-DashboardChildren([int]$ParentPid) {
-    @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentPid" -ErrorAction SilentlyContinue |
+    @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentPid" -ErrorAction Stop |
         Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match '(^|[\\\s])run\.py(["\s]|$)' })
+}
+
+function Get-VerifiedDashboardProcess($CimProcess) {
+    $processHandle = Get-Process -Id $CimProcess.ProcessId -ErrorAction Stop
+    $null = $processHandle.Handle
+    $created = [datetime]$CimProcess.CreationDate
+    if ([Math]::Abs(($processHandle.StartTime.ToUniversalTime() - $created.ToUniversalTime()).TotalMilliseconds) -ge 1) {
+        throw 'Dashboard PID was reused; refusing to stop another process.'
+    }
+    return $processHandle
+}
+
+function Stop-VerifiedDashboardProcess($ProcessHandle) {
+    if ($ProcessHandle.HasExited) { return }
+    try { $ProcessHandle.Kill() } catch {
+        if (-not $ProcessHandle.HasExited) { throw }
+    }
+    if (-not $ProcessHandle.WaitForExit(15000)) {
+        throw 'Dashboard process did not exit within 15 seconds.'
+    }
 }
 
 function Test-Dashboard {
@@ -45,24 +65,23 @@ function Test-Dashboard {
 function Stop-OwnedDashboard {
     if (Test-Path -LiteralPath $pidFile) {
         $serverPid = [int](Get-Content -LiteralPath $pidFile -Raw).Trim()
-        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction SilentlyContinue
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction Stop
         if ($process) {
             if (-not $process.CommandLine -or -not $process.CommandLine.Contains('run.py') -or
                 -not $process.ExecutablePath.StartsWith((Split-Path -Parent $python), [StringComparison]::OrdinalIgnoreCase)) {
                 throw 'Dashboard PID does not belong to this deployment; refusing to stop it.'
             }
             $children = @(Get-DashboardChildren -ParentPid $serverPid)
+            $parentHandle = Get-VerifiedDashboardProcess $process
+            $childHandles = @($children | ForEach-Object { Get-VerifiedDashboardProcess $_ })
             $ownedPids = @($serverPid) + @($children | ForEach-Object { $_.ProcessId })
             $listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($listener -and $listener.OwningProcess -notin $ownedPids) {
                 throw 'Port 5000 belongs to another process; refusing to stop it.'
             }
-            foreach ($child in $children) {
-                Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
-                try { Wait-Process -Id $child.ProcessId -Timeout 15 -ErrorAction SilentlyContinue } catch { }
-            }
-            Stop-Process -Id $serverPid -Force
-            try { Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue } catch { }
+            foreach ($childHandle in $childHandles) { Stop-VerifiedDashboardProcess $childHandle }
+            # The venv launcher may exit as soon as its child is stopped.
+            Stop-VerifiedDashboardProcess $parentHandle
         }
         Remove-Item -LiteralPath $pidFile -Force
     }
