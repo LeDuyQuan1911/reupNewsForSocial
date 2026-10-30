@@ -177,13 +177,14 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
         return result
     live_clock = now is None
     now = now or datetime.now(timezone.utc)
+    scheduled_before = database.scheduled_post_ids(path)
 
     def scheduling_now() -> datetime:
         return datetime.now(timezone.utc) if live_clock else now
 
     def schedule_new_ready() -> None:
         try:
-            result["scheduled"] += schedule_ready(path, scheduling_now())
+            schedule_ready(path, scheduling_now())
         except Exception:
             logging.exception("Immediate scheduling failed; retrying at end of cycle")
 
@@ -204,5 +205,6 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
         if os.environ.get("REUP_LLM_MODEL", "").strip():
             result["reviewed"] += research.review_candidates(path, now, daily_target)["reviewed"]
     result["prepared"] = prepare_articles(path, now, on_ready=schedule_new_ready)
-    result["scheduled"] += schedule_ready(path, scheduling_now())
+    schedule_ready(path, scheduling_now())
+    result["scheduled"] = len(database.scheduled_post_ids(path) - scheduled_before)
     return result

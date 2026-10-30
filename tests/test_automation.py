@@ -111,6 +111,35 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result["scheduled"], 2)
         self.assertEqual(database.count_posts(self.path, view="scheduled"), 2)
 
+    def test_counts_post_scheduled_before_job_status_retry(self):
+        database.save_articles(self.path, self.source_id, self.articles("status-retry", 1))
+        finish_job = database.finish_automation_job
+        failed_once = False
+
+        def flaky_finish(path, article_id, status, post_id=None, error=None):
+            nonlocal failed_once
+            if status == "scheduled" and not failed_once:
+                failed_once = True
+                raise OSError("temporary job status failure")
+            return finish_job(path, article_id, status, post_id, error)
+
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_LLM_MODEL": "test-text",
+                    "REUP_LLM_VISION_MODEL": "test-vision", "REUP_FACEBOOK_PAGE_ID": "123",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "test-only", "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", return_value=(0, [])), \
+             patch("app.automation.media.prepare_post_image", side_effect=self.prepare_image), \
+             patch("app.automation.llm.write_draft", return_value="Draft with source"), \
+             patch("app.automation.llm.check_post", return_value=(True, "OK")), \
+             patch("app.automation.database.finish_automation_job", side_effect=flaky_finish), \
+             patch("app.automation.logging.exception"):
+            result = automation.run_cycle(self.path, self.now)
+
+        self.assertTrue(failed_once)
+        self.assertEqual(result["scheduled"], 1)
+        self.assertEqual(database.count_posts(self.path, view="scheduled"), 1)
+        self.assertEqual(database.automation_status(self.path)["counts"].get("scheduled"), 1)
+
     def test_rejected_image_blocks_automatic_schedule(self):
         def scan(path):
             return database.save_articles(path, self.source_id, self.articles("rejected", 1)), []

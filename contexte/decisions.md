@@ -253,7 +253,7 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 ### 2026-10-31 — Xếp lịch ngay khi từng bài tự động sẵn sàng
 
 - Bối cảnh: lượt Hermes chuẩn bị nhiều bài liên tiếp; bài đã đạt kiểm tra vẫn chưa có lịch cho đến khi toàn bộ lượt kết thúc, có thể bỏ lỡ giờ đăng đầu tiên.
-- Quyết định: sau mỗi bài đạt kiểm tra, thử xếp lịch ngay vào khung còn trống. Nếu bước này lỗi, giữ bài ở trạng thái sẵn sàng và thử lại cuối lượt. Dùng đồng hồ hiện tại khi chạy thật để không đặt lịch vào một giờ đã qua trong lượt dài.
+- Quyết định: sau mỗi bài đạt kiểm tra, thử xếp lịch ngay vào khung còn trống. Nếu bước này lỗi, giữ bài ở trạng thái sẵn sàng và thử lại cuối lượt. Dùng đồng hồ hiện tại khi chạy thật để không đặt lịch vào một giờ đã qua trong lượt dài. Đếm bài mới hẹn theo ID trong DB trước/sau lượt để số liệu vẫn đúng khi đồng bộ job lỗi tạm thời rồi được phục hồi.
 - Lý do: bài đã sẵn sàng không bị giữ lại bởi bài kế tiếp đang viết hoặc xử lý ảnh; vẫn giữ kiểm tra ảnh, bình luận và Page trước khi hẹn.
 - Hệ quả: lượt chuẩn bị có thêm các thao tác SQLite ngắn sau mỗi bài; cần kiểm tra CI và triển khai lên server qua CD sau khi chủ repo merge.
 
