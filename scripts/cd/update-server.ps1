@@ -61,8 +61,19 @@ function Stop-OwnedDashboard {
                 Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
                 try { Wait-Process -Id $child.ProcessId -Timeout 15 -ErrorAction SilentlyContinue } catch { }
             }
-            Stop-Process -Id $serverPid -Force
-            try { Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue } catch { }
+            # The venv launcher may exit as soon as its child is stopped.
+            $remainingParent = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction SilentlyContinue
+            if ($remainingParent) {
+                if ($remainingParent.CreationDate -ne $process.CreationDate) {
+                    throw 'Dashboard PID was reused while stopping; refusing to stop another process.'
+                }
+                Stop-Process -Id $serverPid -Force -ErrorAction SilentlyContinue
+                try { Wait-Process -Id $serverPid -Timeout 15 -ErrorAction SilentlyContinue } catch { }
+                $remainingParent = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction SilentlyContinue
+                if ($remainingParent -and $remainingParent.CreationDate -eq $process.CreationDate) {
+                    throw 'Dashboard launcher is still running; deployment stopped.'
+                }
+            }
         }
         Remove-Item -LiteralPath $pidFile -Force
     }
