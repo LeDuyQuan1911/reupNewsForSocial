@@ -140,6 +140,25 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(database.count_posts(self.path, view="scheduled"), 1)
         self.assertEqual(database.automation_status(self.path)["counts"].get("scheduled"), 1)
 
+    def test_does_not_count_manual_schedule_during_cycle(self):
+        database.save_articles(self.path, self.source_id, self.articles("manual-during-cycle", 1))
+        article_id = database.list_articles(self.path, limit=1)[0]["id"]
+        post_id = database.make_draft(self.path, article_id)
+        self.prepare_image(self.path, post_id)
+        slot = (self.now + timedelta(hours=1)).isoformat()
+
+        def manual_schedule(path, now, on_ready=None):
+            database.schedule_post(path, post_id, slot)
+            return 0
+
+        with patch.dict(os.environ, {"REUP_AUTO_ENABLED": "1"}, clear=True), \
+             patch("app.automation.discovery.scan_sources", return_value=(0, [])), \
+             patch("app.automation.prepare_articles", side_effect=manual_schedule):
+            result = automation.run_cycle(self.path, self.now)
+
+        self.assertEqual(database.count_posts(self.path, view="scheduled"), 1)
+        self.assertEqual(result["scheduled"], 0)
+
     def test_rejected_image_blocks_automatic_schedule(self):
         def scan(path):
             return database.save_articles(path, self.source_id, self.articles("rejected", 1)), []

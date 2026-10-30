@@ -1070,12 +1070,13 @@ def reserved_post_times(path: Path, after_iso: str) -> list[str]:
         )]
 
 
-def scheduled_post_ids(path: Path) -> set[int]:
-    """Snapshot real posts that have received a posting slot."""
+def scheduled_automation_post_ids(path: Path) -> set[int]:
+    """Snapshot prepared-by-automation posts that have received a posting slot."""
     with connect(path) as db:
         return {row["id"] for row in db.execute(
-            "SELECT id FROM posts WHERE scheduled_at IS NOT NULL AND test_only = 0 "
-            "AND status IN ('scheduled', 'publishing', 'published')"
+            "SELECT posts.id FROM posts JOIN automation_jobs ON automation_jobs.post_id = posts.id "
+            "WHERE posts.scheduled_at IS NOT NULL AND posts.test_only = 0 "
+            "AND posts.status IN ('scheduled', 'publishing', 'published')"
         )}
 
 
