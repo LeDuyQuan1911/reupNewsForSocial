@@ -14,7 +14,7 @@ Trong worktree `codex/schedule-ready-early`, sửa `app/automation.py` để g�
 Không đổi điều kiện đăng, ảnh hoặc bình luận. Nếu xếp lịch sớm lỗi, ghi log và thử lại ở cuối lượt. Triển khai code mới qua CI/CD sau khi được chủ repo quyết định merge; các bài đã được hẹn trên server dùng hàm hiện có.
 
 ## Kiểm chứng
-`python -m unittest discover -s tests -p test_automation.py -v`: 17 bài test qua, gồm ba test mới. `git diff --check`: qua ở commit đầu. Đã thử chạy toàn bộ suite cục bộ nhưng các test khác cần nhiều thời gian/truy cập mạng và lượt này bị ngắt; CI Windows sẽ kiểm tra toàn bộ khi có PR. Review độc lập tìm được lỗi đếm thiếu khi job status lỗi tạm thời và tính nhầm bài hẹn thủ công; đã bổ sung cách đếm chỉ các bài tự động và test tái hiện, chờ đối chiếu cuối.
+`python -m unittest discover -s tests -p test_automation.py -v`: 17 bài test qua, gồm ba test mới. `git diff --check`: qua. Đã thử chạy toàn bộ suite cục bộ nhưng các test khác cần nhiều thời gian/truy cập mạng và lượt này bị ngắt; CI Windows sẽ kiểm tra toàn bộ khi có PR. Review độc lập tìm được lỗi đếm thiếu khi job status lỗi tạm thời và tính nhầm bài hẹn thủ công; đã bổ sung cách đếm chỉ các bài tự động và test tái hiện. Reviewer đối chiếu cuối tại commit `490d99f4`: không còn phát hiện mở, 17/17 test đạt.
 
 ## Còn lại
-Bản chạy trên server cần cập nhật qua quy trình CI/CD sau khi được chủ repo phê duyệt merge. Chưa kiểm tra lượt Hermes thực tế với code mới trên server.
+Bản chạy trên server cần cập nhật qua quy trình CI/CD sau khi được chủ repo phê duyệt merge. Chưa kiểm tra lượt Hermes thực tế với code mới trên server; branch cục bộ chưa push hoặc mở PR.
