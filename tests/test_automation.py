@@ -85,6 +85,32 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(database.automation_status(self.path)["counts"].get("scheduled"), 6)
         self.assertEqual(len(database.reserved_post_times(self.path, self.now.isoformat())), 6)
 
+    def test_schedules_ready_post_before_preparing_next_article(self):
+        database.save_articles(self.path, self.source_id, self.articles("early-schedule", 2))
+        writes = 0
+
+        def write_draft(*args):
+            nonlocal writes
+            writes += 1
+            if writes == 2:
+                self.assertEqual(database.count_posts(self.path, view="scheduled"), 1)
+            return "Draft with source"
+
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_LLM_MODEL": "test-text",
+                    "REUP_LLM_VISION_MODEL": "test-vision", "REUP_FACEBOOK_PAGE_ID": "123",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "test-only", "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", return_value=(0, [])), \
+             patch("app.automation.media.prepare_post_image", side_effect=self.prepare_image), \
+             patch("app.automation.llm.write_draft", side_effect=write_draft), \
+             patch("app.automation.llm.check_post", return_value=(True, "OK")):
+            result = automation.run_cycle(self.path, self.now)
+
+        self.assertEqual(writes, 2)
+        self.assertEqual(result["prepared"], 2)
+        self.assertEqual(result["scheduled"], 2)
+        self.assertEqual(database.count_posts(self.path, view="scheduled"), 2)
+
     def test_rejected_image_blocks_automatic_schedule(self):
         def scan(path):
             return database.save_articles(path, self.source_id, self.articles("rejected", 1)), []

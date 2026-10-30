@@ -2,6 +2,8 @@
 
 ## Đã xong
 
+- [x] Xếp lịch từng bài tự động ngay khi đạt kiểm tra trong lượt Hermes, dùng thời gian hiện tại cho khung tiếp theo khi lượt viết kéo dài; vẫn quét lại bài `ready` ở cuối lượt.
+
 - [x] Cho Windows CD nhận tiến trình Python con của `.venv` là chủ cổng dashboard, dừng cả launcher và con khi cập nhật, chờ đủ thời gian health check.
 
 - [x] Sửa release gate CD để nhận cả hai dạng `path` workflow GitHub API và giữ nguyên điều kiện CI push đúng commit `main`.
