@@ -18,4 +18,3 @@ Dùng worktree và branch riêng để giữ lượt review chỉ đọc impleme
 
 ## Còn lại
 Không có phát hiện mở. Chưa kiểm chứng tích hợp với model hoặc Facebook Page. Chưa kiểm chứng model, Facebook Page và đồng hồ thực qua nhiều giờ.
-
