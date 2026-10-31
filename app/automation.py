@@ -41,10 +41,11 @@ def daily_bounds(now: datetime) -> tuple[str, str]:
     return start.isoformat(), (start + timedelta(days=1)).isoformat()
 
 
-def prepare_articles(path: Path, now: datetime, on_ready: Callable[[], None] | None = None) -> int:
+def prepare_articles(path: Path, now: datetime, on_ready: Callable[[], None] | None = None,
+                     daily_limit: int | None = None) -> int:
     if not models_ready():
         return 0
-    daily_limit = database.get_posting_settings(path)["posts_per_day"]
+    daily_limit = daily_limit or database.get_posting_settings(path)["posts_per_day"]
     start, end = daily_bounds(now)
     cutoff = (now - MAX_ARTICLE_AGE).isoformat()
     prepared = 0
@@ -138,6 +139,17 @@ def next_slot(now: datetime, reserved: list[str], posting_times: tuple[str, ...]
     return None
 
 
+def slot_is_for_current_day_or_next_midnight(now: datetime, slot_iso: str, posting_times: tuple[str, ...]) -> bool:
+    local_now = now.astimezone(BANGKOK)
+    slot = datetime.fromisoformat(slot_iso).astimezone(BANGKOK)
+    if slot.date() == local_now.date():
+        return True
+    last_hour, last_minute = map(int, posting_times[-1].split(":"))
+    last_today = datetime.combine(local_now.date(), time(last_hour, last_minute), BANGKOK)
+    return (posting_times[0] == "00:00" and slot.date() == local_now.date() + timedelta(days=1)
+            and slot.time() == time.min and local_now >= last_today + timedelta(minutes=5))
+
+
 def schedule_ready(path: Path, now: datetime) -> int:
     if not page_ready():
         return 0
@@ -145,12 +157,17 @@ def schedule_ready(path: Path, now: datetime) -> int:
     scheduled = 0
     reserved = database.reserved_post_times(path, now.isoformat())
     for job in database.ready_automation_jobs(path):
+        if job["post_status"] in {"scheduled", "publishing", "published", "uncertain"}:
+            database.finish_automation_job(path, job["article_id"], "scheduled", job["post_id"])
+            continue
+        claimed_day = datetime.fromisoformat(job["claimed_at"]).astimezone(BANGKOK).date()
+        if claimed_day < now.astimezone(BANGKOK).date():
+            database.finish_automation_job(path, job["article_id"], "failed", job["post_id"],
+                                           "Bài tự động chưa xếp lịch trước khi hết ngày")
+            continue
         if now - datetime.fromisoformat(job["claimed_at"]) > MAX_ARTICLE_AGE:
             database.finish_automation_job(path, job["article_id"], "failed", job["post_id"],
                                            "Bài đã quá 48 giờ trước khi kết nối Facebook Page")
-            continue
-        if job["post_status"] == "scheduled":
-            database.finish_automation_job(path, job["article_id"], "scheduled", job["post_id"])
             continue
         if job["post_status"] != "draft":
             database.finish_automation_job(path, job["article_id"], "failed", job["post_id"],
@@ -162,7 +179,7 @@ def schedule_ready(path: Path, now: datetime) -> int:
             database.finish_automation_job(path, job["article_id"], "blocked", job["post_id"], str(exc))
             continue
         slot = next_slot(now, reserved, posting_times)
-        if slot is None:
+        if slot is None or not slot_is_for_current_day_or_next_midnight(now, slot, posting_times):
             break
         database.schedule_post(path, job["post_id"], slot)
         database.finish_automation_job(path, job["article_id"], "scheduled", job["post_id"])
@@ -206,5 +223,42 @@ def run_cycle(path: Path, now: datetime | None = None) -> dict[str, int]:
             result["reviewed"] += research.review_candidates(path, now, daily_target)["reviewed"]
     result["prepared"] = prepare_articles(path, now, on_ready=schedule_new_ready)
     schedule_ready(path, scheduling_now())
+    settings = database.get_posting_settings(path)
+    daily_target = settings["posts_per_day"]
+    start, end = daily_bounds(now)
+    cutoff = (now - MAX_ARTICLE_AGE).isoformat()
+    current_now = scheduling_now()
+    next_available = next_slot(current_now, database.reserved_post_times(path, current_now.isoformat()), settings["times"])
+    midnight_prefill = (next_available is not None and
+                        datetime.fromisoformat(next_available).astimezone(BANGKOK).date()
+                        == current_now.astimezone(BANGKOK).date() + timedelta(days=1))
+    refill_limit = daily_target + int(midnight_prefill)
+    if midnight_prefill and slot_is_for_current_day_or_next_midnight(current_now, next_available, settings["times"]):
+        result["prepared"] += prepare_articles(path, now, on_ready=schedule_new_ready, daily_limit=refill_limit)
+        schedule_ready(path, scheduling_now())
+        current_now = scheduling_now()
+        next_available = next_slot(current_now, database.reserved_post_times(path, current_now.isoformat()), settings["times"])
+    if (page_ready() and models_ready()
+            and next_available is not None
+            and slot_is_for_current_day_or_next_midnight(current_now, next_available, settings["times"])
+            and database.automation_refill_needed(path, now.isoformat(), start, end, cutoff, refill_limit)
+            and database.claim_automation_refill_scan(path, now.isoformat())):
+        found, errors = discovery.scan_sources(path)
+        result["found"] += found
+        for error in errors:
+            logging.warning("Automatic refill source scan: %s", error)
+        if hermes_research.enabled():
+            try:
+                found, errors = hermes_research.find_articles(path, now, daily_target)
+                result["found"] += found
+                result["reviewed"] += found
+                for error in errors:
+                    logging.warning("Hermes refill research: %s", error)
+            except Exception as exc:
+                logging.warning("Hermes refill research failed: %s", type(exc).__name__)
+        if os.environ.get("REUP_LLM_MODEL", "").strip():
+            result["reviewed"] += research.review_candidates(path, now, daily_target)["reviewed"]
+        result["prepared"] += prepare_articles(path, now, on_ready=schedule_new_ready, daily_limit=refill_limit)
+        schedule_ready(path, scheduling_now())
     result["scheduled"] = len(database.scheduled_automation_post_ids(path) - scheduled_before)
     return result

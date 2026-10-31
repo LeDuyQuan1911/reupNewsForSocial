@@ -15,7 +15,7 @@ from .hermes_writer import REPO_ROOT, hermes_executable
 
 
 BRIEF = REPO_ROOT / "docs" / "research-brief.md"
-MAX_PROPOSALS = 24
+MAX_PROPOSALS = database.MAX_DAILY_CANDIDATES
 MAX_PAGE_BYTES = 1_500_000
 
 

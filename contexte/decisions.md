@@ -293,3 +293,17 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: mở handle của launcher và con sau khi xác minh PID và thời điểm tạo; dừng bằng handle đã xác minh, coi việc tự thoát là hoàn tất, và dừng triển khai khi CIM lỗi hoặc tiến trình vẫn sống.
 - Lý do: tránh coi launcher tự thoát là lỗi và tránh dừng nhầm tiến trình được Windows cấp lại cùng PID.
 - Hệ quả: test mô phỏng ba trường hợp, nhưng cần kiểm chứng CD thật trên server trước khi coi chu trình cập nhật hoàn tất.
+
+### 2026-10-31 — Quét bổ sung để bù bài tự động bị chặn
+
+- Bối cảnh: chỉ tiêu 19 bài/ngày có thể hụt khi ảnh hoặc nội dung bị chặn; job đã xếp lịch trước đó vẫn bị tính vào chỉ tiêu dù bài đăng chuyển `blocked`.
+- Quyết định: chỉ tính job xếp lịch còn hoạt động vào suất ngày; khi hết ứng viên đã lưu mà vẫn còn giờ cấu hình trống trong ngày, quét nguồn/Hermes bổ sung sau ít nhất 5 phút từ lượt chính, các lượt sau cách ít nhất 30 phút, tối đa 48 lượt/ngày. Bài thay thế chỉ xếp vào giờ đã cấu hình còn lại trong cùng ngày. Nếu có giờ 00:00, chuẩn bị riêng một bài cho ngày kế tiếp sau giờ đăng cuối của ngày hiện tại.
+- Lý do: bù nguồn không đạt mà vẫn giữ kiểm duyệt ảnh/nội dung và không đăng ngoài lịch chủ dự án đã đặt.
+- Hệ quả: không thể bù một giờ đã qua; nếu bài bị chặn ngay lúc đăng, nguồn mới chỉ dùng được cho giờ cấu hình còn lại. Bản nháp `ready` quá ngày không tự chiếm lịch ngày sau; bài 00:00 đã ghi lịch trước khi dừng vẫn được giữ. Mức bài thực tế vẫn phụ thuộc nguồn và model.
+
+### 2026-10-31 — Giới hạn nhóm ứng viên dự phòng
+
+- Bối cảnh: mục tiêu 19 bài/ngày cần ứng viên dư khi ảnh hoặc nội dung bị loại; giới hạn Hermes 24 URL dễ thiếu dự phòng.
+- Quyết định: Hermes có thể đề xuất tối đa 30 URL cho mục tiêu 19 bài/ngày; automation chỉ claim tối đa 30 tin khác nhau/ngày để thử chuẩn bị. Tin thô RSS/GitHub có thể được lưu nhiều hơn nhưng không làm tăng số tin được automation thử trong ngày.
+- Lý do: tạo tối đa 11 ứng viên dự phòng cho 19 suất đăng mà vẫn có giới hạn rõ cho chi phí viết/duyệt.
+- Hệ quả: 30 URL đề xuất không bảo đảm 30 tin hợp lệ sau xác minh, và 30 ứng viên thử không bảo đảm 19 bài đạt kiểm duyệt.
