@@ -569,6 +569,15 @@ class AutomationTests(unittest.TestCase):
         picked, _ = research._ordered_ids(candidates, raw, 2)
         self.assertEqual(picked, [1, 2])
 
+    def test_saved_focus_reaches_rss_ranking_without_web_discovery(self):
+        database.save_content_settings(self.path, "25", database.DEFAULT_WRITING_STYLE,
+                                       "Ưu tiên công cụ bảo mật mã nguồn mở có demo.")
+        database.claim_daily_automation_scan(self.path, self.now.isoformat())
+        database.save_articles(self.path, self.source_id, self.articles("focus", 1))
+        with patch("app.research.llm.chat", return_value='{"picks":[{"id":1,"reason":"Phù hợp"}]}') as chat:
+            research.review_candidates(self.path, self.now, 1)
+        self.assertIn("Ưu tiên công cụ bảo mật mã nguồn mở có demo.", chat.call_args.args[0])
+
     def test_custom_posting_settings_limit_and_times(self):
         settings = database.save_posting_settings(self.path, "2", "13:15, 8:00")
         self.assertEqual(settings, {"posts_per_day": 2, "times": ("08:00", "13:15")})
