@@ -16,7 +16,7 @@ import ssl
 from urllib.parse import urljoin, urlparse
 from uuid import uuid4
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps, ImageStat
 from playwright.sync_api import sync_playwright
 
 from . import database
@@ -32,6 +32,36 @@ Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 class MissingImageError(ValueError):
     """A post cannot be published until its image is ready."""
+
+
+def visually_duplicate(image: bytes, others: list[bytes]) -> bool:
+    """Catch the same picture served at another size or JPEG quality."""
+    if not others:
+        return False
+    digest = hashlib.sha256(image).digest()
+    with Image.open(BytesIO(image)) as source:
+        sample = source.convert("RGB").resize((128, 128), Image.Resampling.LANCZOS)
+    gray = sample.resize((9, 8), Image.Resampling.LANCZOS).convert("L")
+    pixels = list(gray.getdata())
+    signature = sum(1 << (row * 8 + col) for row in range(8) for col in range(8)
+                    if pixels[row * 9 + col] > pixels[row * 9 + col + 1])
+    for other in others:
+        if hashlib.sha256(other).digest() == digest:
+            return True
+        with Image.open(BytesIO(other)) as source:
+            comparison = source.convert("RGB").resize((128, 128), Image.Resampling.LANCZOS)
+        other_gray = comparison.resize((9, 8), Image.Resampling.LANCZOS).convert("L")
+        other_pixels = list(other_gray.getdata())
+        other_signature = sum(1 << (row * 8 + col) for row in range(8) for col in range(8)
+                              if other_pixels[row * 9 + col] > other_pixels[row * 9 + col + 1])
+        if (signature ^ other_signature).bit_count() <= 8:
+            difference = ImageChops.difference(sample, comparison)
+            global_mean = sum(ImageStat.Stat(difference).mean) / 3
+            tile_means = [sum(ImageStat.Stat(difference.crop((x, y, x + 16, y + 16))).mean) / 3
+                          for y in range(0, 128, 16) for x in range(0, 128, 16)]
+            if global_mean <= 18 and max(tile_means) <= 16:
+                return True
+    return False
 
 
 class PinnedHTTPSConnection(HTTPSConnection):
@@ -258,8 +288,18 @@ def publishable_post_image_paths(database_path: Path, post_id: int) -> list[Path
         raise MissingImageError("Bài đăng phải có ít nhất một ảnh")
     if all(image["kind"] == "title_card" for image in images):
         raise MissingImageError("Ảnh thẻ tiêu đề chỉ là ảnh tạm; hãy thêm ảnh bài gốc hoặc ảnh minh họa trước khi đăng")
-    return [post_image_path(database_path, image, post_id)
-            for image in images if image["kind"] != "title_card"]
+    unique = []
+    used_images = []
+    for image in images:
+        if image["kind"] == "title_card":
+            continue
+        path = post_image_path(database_path, image, post_id)
+        raw = path.read_bytes()
+        if visually_duplicate(raw, used_images):
+            continue
+        used_images.append(raw)
+        unique.append(path)
+    return unique
 
 
 def save_post_image(database_path: Path, post_id: int, image: bytes, source_url: str,
@@ -297,7 +337,7 @@ def generated_or_placeholder(post) -> tuple[bytes, str]:
     return normalized_jpeg(title_card(post["article_title"], post["source_name"], post["article_url"])), "title_card"
 
 
-def generated_companion(post, used_hashes: set[bytes]) -> tuple[bytes, str, str] | None:
+def generated_companion(post, used_images: list[bytes]) -> tuple[bytes, str, str] | None:
     """Create one distinct, source-grounded second image when real assets are scarce."""
     if not os.environ.get("REUP_LLM_IMAGE_MODEL", "").strip():
         return None
@@ -306,10 +346,9 @@ def generated_companion(post, used_hashes: set[bytes]) -> tuple[bytes, str, str]
         image = normalized_jpeg(llm.generate_image(
             post["article_title"], post["article_summary"] or "", variant=2,
         ))
-        digest = hashlib.sha256(image).digest()
-        if digest in used_hashes:
+        if visually_duplicate(image, used_images):
             return None
-        used_hashes.add(digest)
+        used_images.append(image)
         return image, post["article_url"], "router_generated"
     except Exception as exc:
         logging.warning("9Router companion image unavailable for post %s: %s", post["id"], type(exc).__name__)
@@ -327,11 +366,11 @@ def prepare_post_image(database_path: Path, post_id: int, append: bool = False) 
         raise ValueError("Mỗi bài tối đa 10 ảnh")
     target = 1 if append else min(PREFERRED_IMAGE_COUNT, 11 - len(existing))
     used_urls = {image["source_url"] for image in existing if image["source_url"]} if append else set()
-    used_hashes = set()
+    used_images = []
     if append:
         for image in existing:
             try:
-                used_hashes.add(hashlib.sha256(post_image_path(database_path, image, post_id).read_bytes()).digest())
+                used_images.append(post_image_path(database_path, image, post_id).read_bytes())
             except MissingImageError:
                 continue
     kind = "repo_asset" if post["source_kind"] in {"github", "hermes_github"} else "source"
@@ -358,28 +397,27 @@ def prepare_post_image(database_path: Path, post_id: int, append: bool = False) 
             image = normalized_jpeg(raw)
         except Exception:
             continue
-        digest = hashlib.sha256(image).digest()
-        if digest in used_hashes:
+        if visually_duplicate(image, used_images):
             continue
-        used_hashes.add(digest)
+        used_images.append(image)
         used_urls.add(final_url)
         saved.append((image, final_url, kind))
     existing_real = sum(image["kind"] != "title_card" for image in existing)
     if kind == "repo_asset" and len(saved) + existing_real < 2:
         try:
             screenshot = normalized_jpeg(screenshot_repository(post["article_url"]))
-            digest = hashlib.sha256(screenshot).digest()
-            if digest not in used_hashes:
+            if not visually_duplicate(screenshot, used_images):
                 saved.append((screenshot, post["article_url"], "screenshot"))
+                used_images.append(screenshot)
         except Exception:
             pass
     if len(saved) + existing_real == 1 and len(saved) < target:
-        companion = generated_companion(post, used_hashes)
+        companion = generated_companion(post, used_images)
         if companion:
             saved.append(companion)
     if not saved:
         if append:
-            companion = generated_companion(post, used_hashes) if existing_real == 1 else None
+            companion = generated_companion(post, used_images) if existing_real == 1 else None
             if companion:
                 saved.append(companion)
             else:
@@ -388,7 +426,7 @@ def prepare_post_image(database_path: Path, post_id: int, append: bool = False) 
         image, fallback_kind = generated_or_placeholder(post)
         first_path = save_post_image(database_path, post_id, image, post["article_url"], fallback_kind, append=False)
         if fallback_kind == "router_generated":
-            companion = generated_companion(post, {hashlib.sha256(image).digest()})
+            companion = generated_companion(post, [image])
             if companion:
                 save_post_image(database_path, post_id, *companion)
         return first_path
