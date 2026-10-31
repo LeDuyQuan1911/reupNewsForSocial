@@ -12,7 +12,7 @@ from urllib.parse import parse_qs
 from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app import anthropic, database, facebook, facebook_groups, feeds, github, llm, media, queue, research, source_content, video
 from app.web import create_app
@@ -863,6 +863,62 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(images), 3)
         self.assertEqual([row["source_url"] for row in images], [urls[0], urls[2], urls[3]])
 
+    def test_same_picture_with_different_jpeg_quality_is_not_added_twice(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        urls = [f"https://cdn.example.com/{name}.jpg" for name in ("original", "reencoded", "different")]
+        database.save_articles(self.db_path, source_id, [{
+            "title": "Visual demo", "url": "https://example.com/visual", "summary": "",
+            "published_at": "", "image_url": urls[0],
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        picture = Image.new("RGB", (640, 320), "#142538")
+        draw = ImageDraw.Draw(picture)
+        draw.ellipse((110, 40, 390, 300), fill="#73cf62")
+        originals = []
+        for quality in (65, 95):
+            output = BytesIO()
+            picture.save(output, "JPEG", quality=quality)
+            originals.append(output.getvalue())
+        other = BytesIO()
+        Image.new("RGB", (640, 320), "#a82b44").save(other, "JPEG")
+        self.assertNotEqual(media.normalized_jpeg(originals[0]), media.normalized_jpeg(originals[1]))
+
+        def fetch_image(url, _limit):
+            return {urls[0]: originals[0], urls[1]: originals[1], urls[2]: other.getvalue()}[url], url
+
+        with patch("app.media.find_article_images", return_value=urls), \
+             patch("app.media.fetch_public_bytes", side_effect=fetch_image):
+            media.prepare_post_image(self.db_path, post_id)
+        images = database.list_post_images(self.db_path, post_id)
+        self.assertEqual([row["source_url"] for row in images], [urls[0], urls[2]])
+
+    def test_similar_layout_with_different_text_is_kept(self):
+        images = []
+        for label in ("FIRST PRODUCT", "RELEASE NOTES"):
+            picture = Image.new("RGB", (1200, 675), "#102019")
+            draw = ImageDraw.Draw(picture)
+            draw.rectangle((50, 100, 1150, 575), outline="#31aa55", width=12)
+            draw.text((100, 265), label, font=ImageFont.load_default(size=72), fill="#f6f6f6")
+            output = BytesIO()
+            picture.save(output, "JPEG", quality=88)
+            images.append(output.getvalue())
+        self.assertFalse(media.visually_duplicate(images[1], [images[0]]))
+
+    def test_publish_filters_visual_duplicates_in_existing_scheduled_post(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, feeds.parse_feed(RSS))
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        first = self.attach_test_image(post_id)
+        duplicate = first.parent / f"post-{post_id}-{'a' * 32}.jpg"
+        with Image.open(first) as picture:
+            picture.save(duplicate, "JPEG", quality=65)
+        database.add_post_image(self.db_path, post_id, duplicate.name, "https://example.com/other-size.jpg", "source")
+        with database.connect(self.db_path) as db:
+            db.execute("UPDATE posts SET status = 'scheduled' WHERE id = ?", (post_id,))
+        self.assertEqual(media.publishable_post_image_paths(self.db_path, post_id), [first])
+
     def test_missing_source_image_uses_9router_image_model(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
         source_id = database.list_sources(self.db_path)[0]["id"]
@@ -883,6 +939,27 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(generate.call_args_list[1].kwargs, {"variant": 2})
         self.assertEqual(database.get_post(self.db_path, post_id)["image_kind"], "router_generated")
         self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 2)
+
+    def test_generated_companion_matching_first_image_is_not_attached(self):
+        database.add_source(self.db_path, "Example", "https://example.com/rss")
+        source_id = database.list_sources(self.db_path)[0]["id"]
+        database.save_articles(self.db_path, source_id, [{
+            "title": "Demo", "url": "https://example.com/demo", "summary": "A product demo",
+            "published_at": "", "image_url": "",
+        }])
+        post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
+        picture = Image.new("RGB", (800, 450), "#101820")
+        ImageDraw.Draw(picture).rectangle((150, 90, 650, 360), fill="#5ad43a")
+        variants = []
+        for quality in (70, 95):
+            output = BytesIO()
+            picture.save(output, "JPEG", quality=quality)
+            variants.append(output.getvalue())
+        with patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": "image-test"}), \
+             patch("app.media.find_article_images", side_effect=media.MissingImageError("No image")), \
+             patch("app.llm.generate_image", side_effect=variants):
+            media.prepare_post_image(self.db_path, post_id)
+        self.assertEqual(len(database.list_post_images(self.db_path, post_id)), 1)
 
     def test_one_source_image_gets_ai_companion_automatically(self):
         database.add_source(self.db_path, "Example", "https://example.com/rss")
@@ -913,7 +990,7 @@ class DashboardTests(unittest.TestCase):
         post_id = database.make_draft(self.db_path, database.list_articles(self.db_path)[0]["id"])
         self.attach_test_image(post_id)
         companion = BytesIO()
-        Image.new("RGB", (800, 450), "green").save(companion, "PNG")
+        Image.new("RGB", (800, 450), "blue").save(companion, "PNG")
         with patch.dict(os.environ, {"REUP_LLM_IMAGE_MODEL": "image-test"}), \
              patch("app.media.find_article_images", return_value=[]), \
              patch("app.llm.generate_image", return_value=companion.getvalue()) as generate:

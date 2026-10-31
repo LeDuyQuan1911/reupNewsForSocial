@@ -307,3 +307,10 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 - Quyết định: Hermes có thể đề xuất tối đa 30 URL cho mục tiêu 19 bài/ngày; automation chỉ claim tối đa 30 tin khác nhau/ngày để thử chuẩn bị. Tin thô RSS/GitHub có thể được lưu nhiều hơn nhưng không làm tăng số tin được automation thử trong ngày.
 - Lý do: tạo tối đa 11 ứng viên dự phòng cho 19 suất đăng mà vẫn có giới hạn rõ cho chi phí viết/duyệt.
 - Hệ quả: 30 URL đề xuất không bảo đảm 30 tin hợp lệ sau xác minh, và 30 ứng viên thử không bảo đảm 19 bài đạt kiểm duyệt.
+
+### 2026-11-01 — Loại ảnh gần trùng trong một bài Page
+
+- Bối cảnh: ảnh Facebook cho hai bài NVIDIA hiển thị cùng một hình ở ba vị trí; kiểm tra URL và SHA-256 của JPEG chỉ bắt bản sao byte giống hệt, không bắt ảnh cùng hình đã đổi kích thước hoặc nén lại.
+- Quyết định: so ảnh thu nhỏ bằng dấu vân tay hình dạng và sai khác màu trước khi thêm ảnh nguồn/ảnh AI, rồi lọc lại ảnh có thể đăng ngay trước khi gửi Page. Nếu chỉ còn một ảnh khác biệt thì đăng một ảnh.
+- Lý do: tránh lặp một hình trong bố cục nhiều ảnh của Facebook, kể cả với bài đã lên lịch trước khi có bộ lọc mới.
+- Hệ quả: phép so ảnh gần trùng có thể bỏ một góc chụp rất giống ảnh trước; bài đã đăng không tự thay đổi.

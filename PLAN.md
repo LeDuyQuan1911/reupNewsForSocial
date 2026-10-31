@@ -6,6 +6,8 @@
 
 ## Đã xong
 
+- [x] Loại ảnh gần trùng dù khác kích thước/chất lượng nén khi chuẩn bị và trước lúc gửi Facebook Page.
+
 - [x] Nâng nhóm ứng viên tự động cho mục tiêu 19 bài/ngày lên tối đa 30 URL Hermes và 30 tin được thử chuẩn bị, dùng tin dư thay bài bị chặn.
 - [x] Cho luồng tự động tìm thêm ứng viên khi bài bị chặn và còn giờ cấu hình trống trong ngày; không đẩy bài bù sang ngày hôm sau.
 
