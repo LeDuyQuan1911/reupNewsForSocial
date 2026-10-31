@@ -90,7 +90,7 @@ class AutomationTests(unittest.TestCase):
         database.save_articles(self.path, self.source_id, self.articles("early-schedule", 2))
         writes = 0
 
-        def write_draft(*args):
+        def write_draft(*args, **kwargs):
             nonlocal writes
             writes += 1
             if writes == 2:
@@ -425,6 +425,28 @@ class AutomationTests(unittest.TestCase):
             db.executemany(
                 "INSERT INTO automation_jobs (article_id, status, claimed_at) VALUES (?, 'blocked', ?)",
                 [(index, now.isoformat()) for index in range(2, 31)],
+            )
+        start, end = automation.daily_bounds(now)
+        cutoff = (now - timedelta(hours=48)).isoformat()
+        self.assertIsNone(database.claim_automation_article(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+        self.assertFalse(database.automation_refill_needed(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+
+    def test_custom_candidate_pool_stops_at_twenty_five(self):
+        now = datetime(2026, 10, 30, 17, 0, tzinfo=timezone.utc)
+        database.save_content_settings(self.path, "25", database.DEFAULT_WRITING_STYLE,
+                                       database.DEFAULT_RESEARCH_FOCUS)
+        database.save_articles(self.path, self.source_id, [
+            {"title": f"Candidate {index}", "url": f"https://example.com/custom-pool/{index}",
+             "summary": "New software", "published_at": now.isoformat()}
+            for index in range(26)
+        ])
+        database.claim_daily_automation_scan(self.path, now.isoformat())
+        with database.connect(self.path) as db:
+            db.executemany(
+                "INSERT INTO automation_jobs (article_id, status, claimed_at) VALUES (?, 'blocked', ?)",
+                [(index, now.isoformat()) for index in range(1, 26)],
             )
         start, end = automation.daily_bounds(now)
         cutoff = (now - timedelta(hours=48)).isoformat()

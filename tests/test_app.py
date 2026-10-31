@@ -483,6 +483,21 @@ class DashboardTests(unittest.TestCase):
         scan.assert_called_once_with(self.db_path)
         self.assertEqual(response.location, "/articles")
 
+    def test_content_settings_form_persists_and_rejects_invalid_changes(self):
+        page = self.client.get("/hermes").get_data(as_text=True)
+        self.assertIn('name="candidate_limit"', page)
+        self.assertIn('name="writing_style"', page)
+        self.assertIn('name="research_focus"', page)
+        values = {"csrf_token": self.csrf, "candidate_limit": "25",
+                  "writing_style": "Viết gọn, mở bằng chi tiết kỹ thuật đã xác minh.",
+                  "research_focus": "Ưu tiên công cụ mã nguồn mở cho lập trình viên."}
+        response = self.client.post("/account/content-settings", data=values)
+        self.assertEqual(response.location, "/hermes")
+        self.assertEqual(database.get_content_settings(self.db_path)["candidate_limit"], 25)
+        self.assertIn(values["writing_style"], self.client.get("/hermes").get_data(as_text=True))
+        self.client.post("/account/content-settings", data={**values, "candidate_limit": "31"})
+        self.assertEqual(database.get_content_settings(self.db_path)["candidate_limit"], 25)
+
     def test_manual_discovery_uses_hermes_web_when_enabled(self):
         with patch.dict(os.environ, {"REUP_HERMES_DISCOVERY_ENABLED": "1"}), \
              patch("app.web.discovery.scan_sources", return_value=(1, [])) as scan, \

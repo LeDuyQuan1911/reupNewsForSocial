@@ -1,9 +1,11 @@
 import os
 import subprocess
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
-from app import hermes_writer
+from app import database, hermes_writer
 
 
 class HermesWriterTests(unittest.TestCase):
@@ -51,6 +53,22 @@ class HermesWriterTests(unittest.TestCase):
         self.assertEqual(comment, "💬 Bạn sẽ thử tính năng này chứ?")
         self.assertIn("Nguồn: https://example.com", run.call_args.kwargs["input"])
         self.assertIn("🔎 Nội dung bài đăng", run.call_args.kwargs["input"])
+
+    def test_saved_writing_style_reaches_draft_and_comment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "news.sqlite3"
+            database.initialize(path)
+            database.save_content_settings(path, "25", "Mở bằng câu hỏi kỹ thuật cụ thể.",
+                                           database.DEFAULT_RESEARCH_FOCUS)
+            settings = {"REUP_LLM_MODEL": "test-model", "REUP_LLM_API_KEY": "test-only"}
+            output = subprocess.CompletedProcess([], 0, "💡 Bài nháp", "")
+            with patch.dict(os.environ, settings), \
+                 patch("app.hermes_writer.hermes_executable", return_value="hermes"), \
+                 patch("app.hermes_writer.subprocess.run", return_value=output) as run:
+                hermes_writer.write_with_hermes("Tiêu đề: Test", database_path=path)
+                self.assertIn("Mở bằng câu hỏi kỹ thuật cụ thể.", run.call_args.kwargs["input"])
+                hermes_writer.write_comment_with_hermes("Tiêu đề: Test", "💡 Bài nháp", database_path=path)
+                self.assertIn("Mở bằng câu hỏi kỹ thuật cụ thể.", run.call_args.kwargs["input"])
 
 
 if __name__ == "__main__":

@@ -58,6 +58,8 @@ Bản nháp tự động chưa kịp xếp lịch trước khi hết ngày đư�
 
 Khi đặt 19 bài/ngày, Hermes được yêu cầu đề xuất tối đa 30 URL để có tin dự phòng. Automation thử chuẩn bị tối đa 30 tin khác nhau trong ngày; nếu một tin bị chặn, tin chưa thử tiếp theo có thể thay vào giờ cấu hình còn trống. Số tin thô lưu từ RSS/GitHub có thể lớn hơn 30, nhưng không làm tăng giới hạn thử chuẩn bị tự động.
 
+Trang **Hermes → Nội dung và nguồn tin** cho chỉnh giới hạn ứng viên dự phòng từ 25 đến 30, phong cách viết bài/bình luận và ưu tiên tìm tin. Thiết lập lưu trong SQLite trên máy đang chạy dashboard và được dùng cho các lượt Hermes tiếp theo, kể cả khi bấm viết lại bài trên web. Giới hạn URL Hermes vẫn không vượt hai lần số bài/ngày; tin RSS/GitHub thô có thể nhiều hơn giới hạn ứng viên được thử chuẩn bị. Thay đổi không viết lại bài đã tạo hoặc dời bài đã lên lịch. Các điều kiện xác minh nguồn, kiểm duyệt và ảnh phù hợp tiếp tục được ứng dụng kiểm tra.
+
 ### Hermes vận hành độc lập
 
 Sau khi cài Hermes và điền `.env`, chạy một lần tại repo:

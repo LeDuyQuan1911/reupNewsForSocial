@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 
+from . import database
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EDITORIAL_BRIEF = REPO_ROOT / "docs" / "editorial-brief.md"
@@ -34,13 +36,23 @@ def hermes_executable() -> str:
     raise ValueError("Hermes chưa được cài. Chạy scripts/setup-hermes.ps1 trước")
 
 
-def write_with_hermes(article_context: str, previous_draft: str = "") -> str:
+def _editorial_prompt(path: Path | None) -> str:
+    brief = EDITORIAL_BRIEF.read_text(encoding="utf-8")
+    if path is None:
+        return brief
+    style = database.get_content_settings(path)["writing_style"]
+    return (f"{brief}\n\n## Phong cách do chủ dự án chọn trên web\n{style}\n"
+            "Các quy tắc về nguồn gốc, tính chính xác và an toàn ở trên luôn được giữ. ")
+
+
+def write_with_hermes(article_context: str, previous_draft: str = "",
+                      database_path: Path | None = None) -> str:
     """Send editorial rules and bounded source context to a fresh Hermes turn."""
     if not os.environ.get("REUP_LLM_MODEL", "").strip():
         raise ValueError("Chưa cấu hình REUP_LLM_MODEL cho Hermes")
     if not os.environ.get("REUP_LLM_API_KEY", "").strip():
         raise ValueError("Chưa cấu hình REUP_LLM_API_KEY cho Hermes")
-    brief = EDITORIAL_BRIEF.read_text(encoding="utf-8")
+    brief = _editorial_prompt(database_path)
     prompt = (
         f"{brief}\n\n## Dữ liệu cho bài đăng hiện tại\n{article_context}\n\n"
         "Hãy viết một bản nháp hoàn chỉnh theo hướng dẫn trên. Chỉ trả nội dung bài đăng."
@@ -70,11 +82,12 @@ def write_with_hermes(article_context: str, previous_draft: str = "") -> str:
     return draft
 
 
-def write_comment_with_hermes(article_context: str, post_body: str) -> str:
+def write_comment_with_hermes(article_context: str, post_body: str,
+                              database_path: Path | None = None) -> str:
     """Ask Hermes for a separate, source-grounded first comment."""
     if not os.environ.get("REUP_LLM_MODEL", "").strip() or not os.environ.get("REUP_LLM_API_KEY", "").strip():
         raise ValueError("Chưa cấu hình Hermes để viết bình luận")
-    brief = EDITORIAL_BRIEF.read_text(encoding="utf-8")
+    brief = _editorial_prompt(database_path)
     prompt = (
         f"{brief}\n\n## Dữ liệu nguồn\n{article_context}\n\n"
         f"## Bài đăng đã viết\n{post_body[:6000]}\n\n"

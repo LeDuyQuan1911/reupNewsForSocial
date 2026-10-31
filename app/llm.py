@@ -6,6 +6,7 @@ import base64
 import logging
 import random
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -49,7 +50,8 @@ def chat(system: str, user: str, max_tokens: int = 600, temperature: float = 0.2
     return request_chat(model, [{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens, temperature)
 
 
-def write_draft(title: str, summary: str, source_url: str, source_kind: str = "rss") -> str:
+def write_draft(title: str, summary: str, source_url: str, source_kind: str = "rss",
+                database_path: Path | None = None) -> str:
     from .hermes_writer import write_with_hermes
     from .source_content import source_excerpt
 
@@ -62,9 +64,9 @@ def write_draft(title: str, summary: str, source_url: str, source_kind: str = "r
     context = f"Trích đoạn đã đọc từ nguồn:\n{excerpt}" if excerpt else "Không đọc được nội dung nguồn; chỉ dùng tiêu đề và tóm tắt."
     article_context = (f"Tiêu đề: {title[:300]}\nTóm tắt: {summary[:1200]}\nNguồn: {source_url}\n"
                        f"{context}\nGợi ý cách mở bài (chỉ dùng nếu dữ kiện hỗ trợ): {angle}")
-    draft = write_with_hermes(article_context)
+    draft = write_with_hermes(article_context, database_path=database_path)
     if not EMOJI_PATTERN.search(draft):
-        draft = write_with_hermes(article_context, previous_draft=draft)
+        draft = write_with_hermes(article_context, previous_draft=draft, database_path=database_path)
     if not EMOJI_PATTERN.search(draft):
         raise ValueError("Hermes chưa tạo bài có icon phù hợp; bản nháp cũ được giữ nguyên")
     source_line = f"Nguồn: {source_url}"
@@ -78,7 +80,8 @@ def write_draft(title: str, summary: str, source_url: str, source_kind: str = "r
     return f"{draft.rstrip()}\n\n{source_line}"
 
 
-def write_first_comment(title: str, summary: str, source_url: str, post_body: str) -> str:
+def write_first_comment(title: str, summary: str, source_url: str, post_body: str,
+                        database_path: Path | None = None) -> str:
     """Let Hermes write the first comment, with a factual source-link fallback."""
     from .hermes_writer import write_comment_with_hermes
 
@@ -89,6 +92,7 @@ def write_first_comment(title: str, summary: str, source_url: str, post_body: st
         comment = write_comment_with_hermes(
             f"Tiêu đề: {title[:300]}\nTóm tắt: {summary[:1200]}\nNguồn: {source_url}",
             post_body,
+            database_path=database_path,
         ).strip()
         if not comment or len(comment) > 2000:
             raise ValueError("Bình luận không hợp lệ")

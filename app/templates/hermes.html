@@ -31,7 +31,20 @@
         <button class="primary" type="submit">Lưu lịch đăng</button>
       </form>
       <template id="posting-time-template"><div class="posting-time-slot"><label></label><input type="time" name="posting_times" step="60" required><button class="secondary posting-time-pick" type="button">Chọn giờ</button></div></template>
-      <div class="posting-settings-scan"><div><strong>Tìm báo và repo mới · {{ 'Hermes tìm web đang bật' if web_research_enabled else 'Hermes tìm web chưa bật' }}</strong><p>Hermes quét nguồn đang bật và, khi bật tìm web, chủ động tìm thêm tin gốc lúc 00:00 giờ Bangkok mỗi ngày. Hệ thống chỉ nhận bài có URL và ngày công bố xác minh được, rồi chọn và chuẩn bị tối đa {{ posting_settings.posts_per_day }} bài. Nếu máy tắt lúc nửa đêm, lượt tìm chạy bù khi Hermes hoạt động lại. Nút bên cạnh tìm thủ công mà không chiếm lượt tự động.</p></div><form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tìm bài mới</button></form></div>
+      <div class="posting-settings-scan"><div><strong>Tìm báo và repo mới · {{ 'Hermes tìm web đang bật' if web_research_enabled else 'Hermes tìm web chưa bật' }}</strong><p>Hermes quét nguồn đang bật và, khi bật tìm web, chủ động tìm thêm tin gốc lúc 00:00 giờ Bangkok mỗi ngày. Hệ thống chỉ nhận bài có URL và ngày công bố xác minh được, thử chuẩn bị tối đa {{ content_settings.candidate_limit }} ứng viên để lấp {{ posting_settings.posts_per_day }} giờ đăng. Nếu máy tắt lúc nửa đêm, lượt tìm chạy bù khi Hermes hoạt động lại. Nút bên cạnh tìm thủ công mà không chiếm lượt tự động.</p></div><form action="{{ url_for('discover') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="secondary" type="submit">Tìm bài mới</button></form></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="content-settings-title">
+    <div class="section-heading"><div><h2 id="content-settings-title">Nội dung và nguồn tin</h2><p>Áp dụng cho các lượt tìm tin, viết bài và viết bình luận tiếp theo.</p></div></div>
+    <div class="posting-settings-body">
+      <form class="content-settings-form" action="{{ url_for('update_content_settings') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="posting-settings-field"><label for="candidate-limit">Ứng viên dự phòng mỗi ngày</label><input id="candidate-limit" type="number" name="candidate_limit" min="25" max="30" value="{{ content_settings.candidate_limit }}" required><small>Tối đa 25–30 tin được thử chuẩn bị; Hermes đề xuất tối đa hai lần mục tiêu bài/ngày trong giới hạn này. Tin bị chặn được thay từ tin dư nếu còn giờ đăng.</small></div>
+        <div class="posting-settings-field"><label for="writing-style">Phong cách viết bài và bình luận</label><textarea id="writing-style" name="writing_style" minlength="20" maxlength="2000" rows="5" required>{{ content_settings.writing_style }}</textarea><small>Mô tả giọng văn, cách mở bài, độ dài, cách dùng icon. Nội dung mới vẫn phải có căn cứ, ít nhất một emoji và URL nguồn.</small></div>
+        <div class="posting-settings-field"><label for="research-focus">Ưu tiên tìm tin</label><textarea id="research-focus" name="research_focus" minlength="20" maxlength="2000" rows="4" required>{{ content_settings.research_focus }}</textarea><small>Nêu chủ đề và loại nguồn muốn ưu tiên. Điều kiện xác minh URL, ngày công bố và chống trùng vẫn được giữ.</small></div>
+        <button class="primary" type="submit">Lưu thiết lập nội dung</button>
+      </form>
     </div>
   </section>
 

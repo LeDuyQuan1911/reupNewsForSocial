@@ -72,8 +72,10 @@ def prepare_articles(path: Path, now: datetime, on_ready: Callable[[], None] | N
             except media.MissingImageError:
                 media.prepare_post_image(path, post_id)
                 image_paths = media.post_image_paths(path, post_id)
-            body = llm.write_draft(article["title"], article["summary"], article["url"], post["source_kind"])
-            comment = llm.write_first_comment(article["title"], article["summary"], article["url"], body)
+            body = llm.write_draft(article["title"], article["summary"], article["url"], post["source_kind"],
+                                   database_path=path)
+            comment = llm.write_first_comment(article["title"], article["summary"], article["url"], body,
+                                              database_path=path)
             if post["source_kind"] not in {"github", "hermes_github"} and not post["video_url"]:
                 try:
                     found_video = video.find_relevant_video(article["url"], article["title"], article["summary"])

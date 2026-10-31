@@ -56,6 +56,20 @@ class HermesResearchTests(unittest.TestCase):
         self.assertEqual((count, errors), (0, []))
         self.assertIn("đề xuất tối đa 30 URL", run.call_args.kwargs["input"])
 
+    def test_saved_candidate_limit_and_focus_reach_research(self):
+        database.save_content_settings(self.path, "25", database.DEFAULT_WRITING_STYLE,
+                                       "Ưu tiên công cụ bảo mật mã nguồn mở có demo.")
+        settings = {"REUP_HERMES_DISCOVERY_ENABLED": "1", "REUP_LLM_MODEL": "test-model",
+                    "REUP_LLM_API_KEY": "test-secret"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.hermes_research.hermes_executable", return_value="hermes"), \
+             patch("app.hermes_research.subprocess.run",
+                   return_value=subprocess.CompletedProcess([], 0, '{"articles":[]}', "")) as run:
+            hermes_research.find_articles(self.path, self.now, 19)
+        prompt = run.call_args.kwargs["input"]
+        self.assertIn("đề xuất tối đa 25 URL", prompt)
+        self.assertIn("Ưu tiên công cụ bảo mật mã nguồn mở có demo.", prompt)
+
     def test_rejects_old_or_unverifiable_page_even_if_hermes_recommends_it(self):
         url = "https://vendor.example/news/old-story"
         output = json.dumps({"articles": [{"url": url, "reason": "Có vẻ là tin mới rất đáng đọc"}]})
