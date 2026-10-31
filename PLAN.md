@@ -6,6 +6,9 @@
 
 ## Đã xong
 
+- [x] Nâng nhóm ứng viên tự động cho mục tiêu 19 bài/ngày lên tối đa 30 URL Hermes và 30 tin được thử chuẩn bị, dùng tin dư thay bài bị chặn.
+- [x] Cho luồng tự động tìm thêm ứng viên khi bài bị chặn và còn giờ cấu hình trống trong ngày; không đẩy bài bù sang ngày hôm sau.
+
 - [x] Xếp lịch từng bài tự động ngay khi đạt kiểm tra trong lượt Hermes, dùng thời gian hiện tại cho khung tiếp theo khi lượt viết kéo dài; vẫn quét lại bài `ready` ở cuối lượt.
 
 - [x] Cho Windows CD nhận tiến trình Python con của `.venv` là chủ cổng dashboard, dừng cả launcher và con khi cập nhật, chờ đủ thời gian health check.

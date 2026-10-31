@@ -8,6 +8,9 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 
+MAX_DAILY_CANDIDATES = 30
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
@@ -82,7 +85,10 @@ CREATE INDEX IF NOT EXISTS idx_post_images_order ON post_images(post_id, sort_or
 CREATE TABLE IF NOT EXISTS automation_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     baseline_article_id INTEGER NOT NULL,
-    last_scan_at TEXT
+    last_scan_at TEXT,
+    refill_day TEXT,
+    refill_scans INTEGER NOT NULL DEFAULT 0,
+    last_refill_at TEXT
 );
 CREATE TABLE IF NOT EXISTS automation_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -186,6 +192,12 @@ def initialize(path: Path) -> None:
             db.execute("ALTER TABLE automation_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1")
         if "last_attempt_at" not in job_columns:
             db.execute("ALTER TABLE automation_jobs ADD COLUMN last_attempt_at TEXT")
+        state_columns = {row["name"] for row in db.execute("PRAGMA table_info(automation_state)")}
+        for name, definition in (("refill_day", "TEXT"),
+                                 ("refill_scans", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("last_refill_at", "TEXT")):
+            if name not in state_columns:
+                db.execute(f"ALTER TABLE automation_state ADD COLUMN {name} {definition}")
         db.execute(
             "INSERT OR IGNORE INTO automation_settings (id, posts_per_day, posting_times) VALUES (1, ?, ?)",
             (len(DEFAULT_POSTING_TIMES), json.dumps(DEFAULT_POSTING_TIMES)),
@@ -949,8 +961,88 @@ def claim_daily_automation_scan(path: Path, now_iso: str) -> bool:
         last = db.execute("SELECT last_scan_at FROM automation_state WHERE id = 1").fetchone()["last_scan_at"]
         if last and datetime.fromisoformat(last).astimezone(ZoneInfo("Asia/Bangkok")).date() >= current_day:
             return False
-        db.execute("UPDATE automation_state SET last_scan_at = ? WHERE id = 1", (now_iso,))
+        db.execute(
+            "UPDATE automation_state SET last_scan_at = ?, refill_day = ?, refill_scans = 0, "
+            "last_refill_at = ? WHERE id = 1",
+            (now_iso, current_day.isoformat(), now_iso),
+        )
         return True
+
+
+def claim_automation_refill_scan(path: Path, now_iso: str, max_scans: int = 48) -> bool:
+    """Bound extra source searches per Bangkok day and space repeated attempts."""
+    current_day = datetime.fromisoformat(now_iso).astimezone(ZoneInfo("Asia/Bangkok")).date().isoformat()
+    with connect(path) as db:
+        row = db.execute(
+            "SELECT refill_day, refill_scans, last_refill_at FROM automation_state WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return False
+        scans = row["refill_scans"] if row["refill_day"] == current_day else 0
+        last = row["last_refill_at"] if row["refill_day"] == current_day else None
+        wait = timedelta(minutes=5 if scans == 0 else 30)
+        if scans >= max_scans or (last and datetime.fromisoformat(now_iso) - datetime.fromisoformat(last) < wait):
+            return False
+        db.execute(
+            "UPDATE automation_state SET refill_day = ?, refill_scans = ?, last_refill_at = ? WHERE id = 1",
+            (current_day, scans + 1, now_iso),
+        )
+        return True
+
+
+def automation_refill_needed(path: Path, now_iso: str, day_start: str, day_end: str,
+                             cutoff_iso: str, daily_limit: int) -> bool:
+    """Search again only when there is capacity and no saved eligible article."""
+    with connect(path) as db:
+        used = _automation_daily_used(db, day_start, day_end)
+        if used >= daily_limit:
+            return False
+        claimed = _automation_daily_candidates(db, day_start, day_end)
+        if claimed >= MAX_DAILY_CANDIDATES:
+            return False
+        baseline = db.execute("SELECT baseline_article_id FROM automation_state WHERE id = 1").fetchone()
+        if baseline is None:
+            return False
+        candidate = db.execute(
+            """SELECT 1 FROM articles JOIN sources ON sources.id = articles.source_id
+               LEFT JOIN posts ON posts.article_id = articles.id
+               LEFT JOIN automation_jobs AS jobs ON jobs.article_id = articles.id
+               WHERE articles.id > ? AND sources.active = 1 AND posts.id IS NULL AND jobs.article_id IS NULL
+                 AND datetime(articles.discovered_at) >= datetime(?)
+                 AND (articles.published_at IS NULL OR articles.published_at = ''
+                      OR datetime(articles.published_at) >= datetime(?)) LIMIT 1""",
+            (baseline["baseline_article_id"], cutoff_iso, cutoff_iso),
+        ).fetchone()
+        return candidate is None
+
+
+def _automation_daily_used(db: sqlite3.Connection, day_start: str, day_end: str) -> int:
+    """Count active work claimed today and earlier work already placed today."""
+    return db.execute(
+        """SELECT COUNT(*) FROM automation_jobs AS jobs
+           LEFT JOIN posts ON posts.id = jobs.post_id
+           WHERE (jobs.claimed_at >= ? AND jobs.claimed_at < ?
+                  AND (jobs.status IN ('processing', 'ready')
+                       OR (jobs.status = 'failed' AND jobs.attempts < 3)
+                       OR (jobs.status = 'scheduled' AND posts.status IN
+                           ('scheduled', 'publishing', 'published', 'uncertain'))))
+              OR (jobs.claimed_at < ? AND jobs.status = 'scheduled'
+                  AND posts.status IN ('scheduled', 'publishing', 'published', 'uncertain')
+                  AND ((posts.scheduled_at >= ? AND posts.scheduled_at < ?)
+                       OR (posts.published_at >= ? AND posts.published_at < ?)))""",
+        (day_start, day_end, day_start, day_start, day_end, day_start, day_end),
+    ).fetchone()[0]
+
+
+def _automation_daily_candidates(db: sqlite3.Connection, day_start: str, day_end: str) -> int:
+    """Include yesterday's candidate reserved for today's midnight slot."""
+    return db.execute(
+        """SELECT COUNT(*) FROM automation_jobs AS jobs
+           LEFT JOIN posts ON posts.id = jobs.post_id
+           WHERE (jobs.claimed_at >= ? AND jobs.claimed_at < ?)
+              OR (jobs.claimed_at < ? AND posts.scheduled_at >= ? AND posts.scheduled_at < ?)""",
+        (day_start, day_end, day_start, day_start, day_end),
+    ).fetchone()[0]
 
 
 def claim_automation_article(path: Path, now_iso: str, day_start: str, day_end: str,
@@ -982,13 +1074,11 @@ def claim_automation_article(path: Path, now_iso: str, day_start: str, day_end: 
                 (now_iso, retry["id"]),
             )
             return retry
-        used = db.execute(
-            """SELECT COUNT(*) FROM automation_jobs WHERE claimed_at >= ? AND claimed_at < ?
-               AND (status IN ('processing', 'ready', 'scheduled') OR
-                    (status = 'failed' AND attempts < 3))""",
-            (day_start, day_end),
-        ).fetchone()[0]
+        used = _automation_daily_used(db, day_start, day_end)
         if used >= daily_limit:
+            return None
+        claimed = _automation_daily_candidates(db, day_start, day_end)
+        if claimed >= MAX_DAILY_CANDIDATES:
             return None
         article = db.execute(
             """SELECT articles.*, NULL AS automation_post_id FROM articles

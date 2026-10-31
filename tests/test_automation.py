@@ -53,6 +53,7 @@ class AutomationTests(unittest.TestCase):
         return image
 
     def test_scans_and_prepares_six_new_articles_without_page(self):
+        self.now = datetime(2026, 10, 30, 17, 0, tzinfo=timezone.utc)
         database.save_articles(self.path, self.source_id, self.articles("old", 1))
         with database.connect(self.path) as db:
             old = (self.now - timedelta(days=3)).isoformat()
@@ -263,6 +264,210 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result["prepared"], 6)
         self.assertEqual(database.automation_status(self.path)["counts"].get("blocked"), 1)
 
+    def test_refill_search_replaces_rejected_article_at_configured_hour(self):
+        database.save_posting_settings(self.path, "2", "08:00, 13:00")
+        now = datetime(2026, 10, 31, 0, 0, tzinfo=timezone.utc)
+        self.now = now
+        batches = [self.articles("first", 2), self.articles("replacement", 3)[2:]]
+
+        def scan(path):
+            return database.save_articles(path, self.source_id, batches.pop(0)), []
+
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_LLM_MODEL": "test-text",
+                    "REUP_LLM_VISION_MODEL": "test-vision", "REUP_FACEBOOK_PAGE_ID": "123",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "test-only", "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", side_effect=scan) as scanner, \
+             patch("app.automation.media.prepare_post_image", side_effect=self.prepare_image), \
+             patch("app.automation.llm.write_draft", return_value="Draft with source"), \
+             patch("app.automation.llm.check_post", side_effect=[(False, "Title card"),
+                                                             (True, "OK"), (True, "OK")]), \
+             patch("app.automation.video.find_relevant_video", return_value=None):
+            first = automation.run_cycle(self.path, now)
+            second = automation.run_cycle(self.path, now + timedelta(minutes=6))
+
+        self.assertEqual(first["scheduled"], 1)
+        self.assertEqual(second["scheduled"], 1)
+        self.assertEqual(scanner.call_count, 2)
+        self.assertEqual(database.automation_status(self.path)["counts"].get("blocked"), 1)
+        scheduled = [post for post in database.list_posts(self.path) if post["status"] == "scheduled"]
+        self.assertEqual(len(scheduled), 2)
+        self.assertEqual({datetime.fromisoformat(post["scheduled_at"]).astimezone(automation.BANGKOK).strftime("%H:%M")
+                          for post in scheduled}, {"08:00", "13:00"})
+
+    def test_late_replacement_is_not_scheduled_into_tomorrow(self):
+        database.save_posting_settings(self.path, "1", "08:00")
+        now = datetime(2026, 10, 31, 2, 0, tzinfo=timezone.utc)  # 09:00 Bangkok
+        article = self.articles("late", 1)[0]
+        database.save_articles(self.path, self.source_id, [article])
+        post_id = database.make_automation_draft(self.path, 1)
+        self.prepare_image(self.path, post_id)
+        database.set_first_comment(self.path, post_id, "Source")
+        with database.connect(self.path) as db:
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) VALUES (1, ?, 'ready', ?)",
+                       (post_id, now.isoformat()))
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-only",
+                    "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True):
+            self.assertEqual(automation.schedule_ready(self.path, now), 0)
+        self.assertEqual(database.get_post(self.path, post_id)["status"], "draft")
+
+    def test_previous_day_ready_draft_does_not_take_today_slot(self):
+        database.save_posting_settings(self.path, "1", "08:00")
+        yesterday = datetime(2026, 10, 31, 2, 0, tzinfo=timezone.utc)  # 09:00 Bangkok
+        today = yesterday + timedelta(days=1) - timedelta(hours=2)
+        self.now = yesterday
+        database.save_articles(self.path, self.source_id, self.articles("old-ready", 1))
+        post_id = database.make_automation_draft(self.path, 1)
+        self.prepare_image(self.path, post_id)
+        database.set_first_comment(self.path, post_id, "Source")
+        with database.connect(self.path) as db:
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) VALUES (1, ?, 'ready', ?)",
+                       (post_id, yesterday.isoformat()))
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-only",
+                    "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True):
+            self.assertEqual(automation.schedule_ready(self.path, today), 0)
+        self.assertEqual(database.automation_status(self.path)["counts"].get("failed"), 1)
+        self.assertIsNone(database.get_post(self.path, post_id)["scheduled_at"])
+
+    def test_crash_after_midnight_schedule_keeps_post_scheduled(self):
+        yesterday = datetime(2026, 10, 31, 16, 6, tzinfo=timezone.utc)
+        today = yesterday + timedelta(hours=1)
+        self.now = yesterday
+        database.save_articles(self.path, self.source_id, self.articles("midnight-crash", 2))
+        post_id = database.make_automation_draft(self.path, 1)
+        published_id = database.make_automation_draft(self.path, 2)
+        with database.connect(self.path) as db:
+            db.execute("UPDATE posts SET status = 'scheduled', scheduled_at = ? WHERE id = ?",
+                       (today.replace(minute=0).isoformat(), post_id))
+            db.execute("UPDATE posts SET status = 'published', scheduled_at = ?, published_at = ? WHERE id = ?",
+                       (today.replace(minute=0).isoformat(), today.isoformat(), published_id))
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                       "VALUES (1, ?, 'ready', ?)", (post_id, yesterday.isoformat()))
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                       "VALUES (2, ?, 'ready', ?)", (published_id, yesterday.isoformat()))
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-only",
+                    "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True):
+            automation.schedule_ready(self.path, today)
+        self.assertEqual(database.automation_status(self.path)["counts"].get("scheduled"), 2)
+        self.assertEqual(database.get_post(self.path, post_id)["status"], "scheduled")
+        self.assertEqual(database.get_post(self.path, published_id)["status"], "published")
+
+    def test_next_midnight_can_be_prepared_after_last_daily_hour(self):
+        database.save_posting_settings(self.path, "2", "00:00, 23:00")
+        now = datetime(2026, 10, 31, 16, 6, tzinfo=timezone.utc)  # 23:06 Bangkok
+        article = self.articles("midnight", 1)[0]
+        database.save_articles(self.path, self.source_id, [article])
+        post_id = database.make_automation_draft(self.path, 1)
+        self.prepare_image(self.path, post_id)
+        database.set_first_comment(self.path, post_id, "Source")
+        with database.connect(self.path) as db:
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) VALUES (1, ?, 'ready', ?)",
+                       (post_id, now.isoformat()))
+        settings = {"REUP_FACEBOOK_PAGE_ID": "123", "REUP_FACEBOOK_PAGE_TOKEN": "test-only",
+                    "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True):
+            self.assertEqual(automation.schedule_ready(self.path, now), 1)
+        scheduled = database.get_post(self.path, post_id)["scheduled_at"]
+        self.assertEqual(datetime.fromisoformat(scheduled).astimezone(automation.BANGKOK).strftime("%Y-%m-%d %H:%M"),
+                         "2026-11-01 00:00")
+
+    def test_previous_day_midnight_post_counts_toward_new_day_target(self):
+        previous = datetime(2026, 10, 31, 16, 6, tzinfo=timezone.utc)
+        next_day = datetime(2026, 10, 31, 17, 6, tzinfo=timezone.utc)
+        self.now = next_day
+        database.save_articles(self.path, self.source_id, self.articles("next-day", 2))
+        post_id = database.make_automation_draft(self.path, 1)
+        with database.connect(self.path) as db:
+            db.execute("UPDATE posts SET status = 'scheduled', scheduled_at = ? WHERE id = ?",
+                       (datetime(2026, 10, 31, 17, 0, tzinfo=timezone.utc).isoformat(), post_id))
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                       "VALUES (1, ?, 'scheduled', ?)", (post_id, previous.isoformat()))
+        database.claim_daily_automation_scan(self.path, next_day.isoformat())
+        start, end = automation.daily_bounds(next_day)
+        candidate = database.claim_automation_article(
+            self.path, next_day.isoformat(), start, end, (next_day - timedelta(hours=48)).isoformat(), 1)
+        self.assertIsNone(candidate)
+
+    def test_block_at_publish_releases_automation_quota(self):
+        now = datetime(2026, 10, 31, 0, 0, tzinfo=timezone.utc)
+        self.now = now
+        database.save_articles(self.path, self.source_id, self.articles("quota", 3))
+        database.claim_daily_automation_scan(self.path, now.isoformat())
+        for article_id, status in ((1, "blocked"), (2, "scheduled")):
+            post_id = database.make_automation_draft(self.path, article_id)
+            with database.connect(self.path) as db:
+                db.execute("UPDATE posts SET status = ? WHERE id = ?", (status, post_id))
+                db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                           "VALUES (?, ?, 'scheduled', ?)", (article_id, post_id, now.isoformat()))
+        start, end = automation.daily_bounds(now)
+        candidate = database.claim_automation_article(
+            self.path, now.isoformat(), start, end, (now - timedelta(hours=48)).isoformat(), 2)
+        self.assertEqual(candidate["id"], 3)
+
+    def test_auto_candidate_pool_stops_after_thirty_distinct_articles(self):
+        now = datetime(2026, 10, 30, 17, 0, tzinfo=timezone.utc)
+        articles = [
+            {"title": f"Candidate {index}", "url": f"https://example.com/pool/{index}",
+             "summary": "New software", "published_at": now.isoformat()}
+            for index in range(31)
+        ]
+        database.save_articles(self.path, self.source_id, articles)
+        database.claim_daily_automation_scan(self.path, now.isoformat())
+        midnight_post = database.make_automation_draft(self.path, 1)
+        with database.connect(self.path) as db:
+            db.execute("UPDATE posts SET status = 'scheduled', scheduled_at = ? WHERE id = ?",
+                       (now.isoformat(), midnight_post))
+            db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                       "VALUES (1, ?, 'scheduled', ?)", (midnight_post, (now - timedelta(hours=1)).isoformat()))
+            db.executemany(
+                "INSERT INTO automation_jobs (article_id, status, claimed_at) VALUES (?, 'blocked', ?)",
+                [(index, now.isoformat()) for index in range(2, 31)],
+            )
+        start, end = automation.daily_bounds(now)
+        cutoff = (now - timedelta(hours=48)).isoformat()
+        self.assertIsNone(database.claim_automation_article(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+        self.assertFalse(database.automation_refill_needed(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+
+    def test_publish_block_triggers_refill_for_later_configured_slot(self):
+        database.save_posting_settings(self.path, "3", "08:00, 13:00, 18:00")
+        now = datetime(2026, 10, 31, 7, 0, tzinfo=timezone.utc)  # 14:00 Bangkok
+        self.now = now
+        database.save_articles(self.path, self.source_id, self.articles("original", 2))
+        database.claim_daily_automation_scan(self.path, (now - timedelta(hours=7)).isoformat())
+        for article_id, status in ((1, "blocked"), (2, "scheduled")):
+            post_id = database.make_automation_draft(self.path, article_id)
+            with database.connect(self.path) as db:
+                db.execute("UPDATE posts SET status = ?, scheduled_at = ? WHERE id = ?",
+                           (status, (now - timedelta(hours=1)).isoformat(), post_id))
+                db.execute("INSERT INTO automation_jobs (article_id, post_id, status, claimed_at) "
+                           "VALUES (?, ?, 'scheduled', ?)", (article_id, post_id, (now - timedelta(hours=7)).isoformat()))
+
+        def scan(path):
+            return database.save_articles(path, self.source_id, self.articles("replacement", 3)[2:]), []
+
+        settings = {"REUP_AUTO_ENABLED": "1", "REUP_LLM_MODEL": "test-text",
+                    "REUP_LLM_VISION_MODEL": "test-vision", "REUP_FACEBOOK_PAGE_ID": "123",
+                    "REUP_FACEBOOK_PAGE_TOKEN": "test-only", "REUP_META_GRAPH_VERSION": "v99.0"}
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("app.automation.discovery.scan_sources", side_effect=scan) as scanner, \
+             patch("app.automation.media.prepare_post_image", side_effect=self.prepare_image), \
+             patch("app.automation.llm.write_draft", return_value="Draft with source"), \
+             patch("app.automation.llm.check_post", return_value=(True, "OK")), \
+             patch("app.automation.video.find_relevant_video", return_value=None):
+            result = automation.run_cycle(self.path, now)
+
+        scanner.assert_called_once()
+        self.assertEqual(result["scheduled"], 1)
+        posts = database.list_posts(self.path)
+        replacement = next(post for post in posts if post["article_title"].startswith("replacement"))
+        self.assertEqual(datetime.fromisoformat(replacement["scheduled_at"]).astimezone(automation.BANGKOK).strftime("%H:%M"),
+                         "18:00")
+
     def test_paused_source_does_not_prepare_saved_articles(self):
         database.save_articles(self.path, self.source_id, self.articles("paused", 1))
         database.claim_daily_automation_scan(self.path, self.now.isoformat())
@@ -282,6 +487,19 @@ class AutomationTests(unittest.TestCase):
         self.assertTrue(database.claim_daily_automation_scan(self.path, late.isoformat()))
         self.assertFalse(database.claim_daily_automation_scan(self.path, (late + timedelta(minutes=20)).isoformat()))
         self.assertTrue(database.claim_daily_automation_scan(self.path, after_midnight.isoformat()))
+
+    def test_existing_automation_state_migrates_for_refill_scans(self):
+        with database.connect(self.path) as db:
+            db.execute("DROP TABLE automation_state")
+            db.execute("CREATE TABLE automation_state (id INTEGER PRIMARY KEY, baseline_article_id INTEGER, last_scan_at TEXT)")
+            db.execute("INSERT INTO automation_state VALUES (1, 0, NULL)")
+        database.initialize(self.path)
+        self.assertTrue(database.claim_daily_automation_scan(self.path, self.now.isoformat()))
+        self.assertFalse(database.claim_automation_refill_scan(self.path, self.now.isoformat()))
+        self.assertTrue(database.claim_automation_refill_scan(
+            self.path, (self.now + timedelta(minutes=6)).isoformat()))
+        self.assertFalse(database.claim_automation_refill_scan(
+            self.path, (self.now + timedelta(minutes=7)).isoformat()))
 
     def test_midnight_cycle_scans_once_and_uses_daily_post_target(self):
         database.save_posting_settings(self.path, "2", "08:00, 13:15")
