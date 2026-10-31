@@ -9,6 +9,15 @@ from zoneinfo import ZoneInfo
 
 
 MAX_DAILY_CANDIDATES = 30
+DEFAULT_WRITING_STYLE = (
+    "Viết cho cộng đồng IT Việt Nam bằng tiếng Việt. Mở bằng chi tiết cụ thể đáng chú ý; "
+    "giải thích điểm mới và giá trị thực tế bằng đoạn ngắn, dễ lướt. Có thể hài hước tự nhiên. "
+    "Dùng emoji có ý nghĩa theo nội dung, không theo mẫu mỗi dòng một icon."
+)
+DEFAULT_RESEARCH_FOCUS = (
+    "Ưu tiên tin công nghệ mới từ nguồn chính thức và repo GitHub có demo rõ ràng; "
+    "chọn chủ đề có giá trị thực tế cho người làm IT."
+)
 
 
 SCHEMA = """
@@ -99,6 +108,12 @@ CREATE TABLE IF NOT EXISTS automation_settings_history (
     id INTEGER PRIMARY KEY,
     changed_at TEXT NOT NULL,
     posts_per_day INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS content_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    candidate_limit INTEGER NOT NULL DEFAULT 30 CHECK (candidate_limit BETWEEN 25 AND 30),
+    writing_style TEXT NOT NULL,
+    research_focus TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS automation_jobs (
     article_id INTEGER PRIMARY KEY REFERENCES articles(id),
@@ -206,6 +221,38 @@ def initialize(path: Path) -> None:
             "INSERT OR IGNORE INTO automation_settings_history (id, changed_at, posts_per_day) VALUES (1, ?, ?)",
             ("1970-01-01T00:00:00+00:00", len(DEFAULT_POSTING_TIMES)),
         )
+        db.execute(
+            "INSERT OR IGNORE INTO content_settings (id, candidate_limit, writing_style, research_focus) "
+            "VALUES (1, ?, ?, ?)",
+            (MAX_DAILY_CANDIDATES, DEFAULT_WRITING_STYLE, DEFAULT_RESEARCH_FOCUS),
+        )
+
+
+def get_content_settings(path: Path) -> dict:
+    with connect(path) as db:
+        row = db.execute(
+            "SELECT candidate_limit, writing_style, research_focus FROM content_settings WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        return {"candidate_limit": MAX_DAILY_CANDIDATES, "writing_style": DEFAULT_WRITING_STYLE,
+                "research_focus": DEFAULT_RESEARCH_FOCUS}
+    return dict(row)
+
+
+def save_content_settings(path: Path, candidate_value: str, writing_style: str,
+                          research_focus: str) -> dict:
+    if not re.fullmatch(r"\d{2}", candidate_value.strip()) or not 25 <= int(candidate_value) <= 30:
+        raise ValueError("Số ứng viên dự phòng phải từ 25 đến 30")
+    writing_style = writing_style.strip()
+    research_focus = research_focus.strip()
+    if not 20 <= len(writing_style) <= 2000:
+        raise ValueError("Phong cách viết cần từ 20 đến 2000 ký tự")
+    if not 20 <= len(research_focus) <= 2000:
+        raise ValueError("Ưu tiên tìm tin cần từ 20 đến 2000 ký tự")
+    with connect(path) as db:
+        db.execute("UPDATE content_settings SET candidate_limit = ?, writing_style = ?, research_focus = ? WHERE id = 1",
+                   (int(candidate_value), writing_style, research_focus))
+    return get_content_settings(path)
 
 
 def get_posting_settings(path: Path) -> dict:
@@ -998,7 +1045,8 @@ def automation_refill_needed(path: Path, now_iso: str, day_start: str, day_end: 
         if used >= daily_limit:
             return False
         claimed = _automation_daily_candidates(db, day_start, day_end)
-        if claimed >= MAX_DAILY_CANDIDATES:
+        limit = db.execute("SELECT candidate_limit FROM content_settings WHERE id = 1").fetchone()[0]
+        if claimed >= limit:
             return False
         baseline = db.execute("SELECT baseline_article_id FROM automation_state WHERE id = 1").fetchone()
         if baseline is None:
@@ -1078,7 +1126,8 @@ def claim_automation_article(path: Path, now_iso: str, day_start: str, day_end: 
         if used >= daily_limit:
             return None
         claimed = _automation_daily_candidates(db, day_start, day_end)
-        if claimed >= MAX_DAILY_CANDIDATES:
+        limit = db.execute("SELECT candidate_limit FROM content_settings WHERE id = 1").fetchone()[0]
+        if claimed >= limit:
             return None
         article = db.execute(
             """SELECT articles.*, NULL AS automation_post_id FROM articles

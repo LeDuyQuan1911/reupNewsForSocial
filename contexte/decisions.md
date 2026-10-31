@@ -305,5 +305,10 @@ Ghi mỗi quyết định quan trọng theo mẫu dưới đây.
 
 - Bối cảnh: mục tiêu 19 bài/ngày cần ứng viên dư khi ảnh hoặc nội dung bị loại; giới hạn Hermes 24 URL dễ thiếu dự phòng.
 - Quyết định: Hermes có thể đề xuất tối đa 30 URL cho mục tiêu 19 bài/ngày; automation chỉ claim tối đa 30 tin khác nhau/ngày để thử chuẩn bị. Tin thô RSS/GitHub có thể được lưu nhiều hơn nhưng không làm tăng số tin được automation thử trong ngày.
+
+## 2026-11-01 — Thiết lập biên tập trên web
+
+- Bối cảnh: chủ dự án muốn tự sửa các lựa chọn đã nêu, gồm phong cách viết, trên giao diện thay vì chỉnh file hướng dẫn trong repo.
+- Quyết định: lưu phong cách viết bài/bình luận, ưu tiên tìm tin và giới hạn 25–30 ứng viên trong bảng `content_settings` của SQLite. Lượt Hermes mới đọc giá trị đã lưu; brief cố định giữ các điều kiện nguồn gốc, độ chính xác và an toàn. Giữ secrets, token và cấu hình kết nối trong biến môi trường, không đưa giá trị lên form. Thay đổi không sửa lại các bài đã tạo.
 - Lý do: tạo tối đa 11 ứng viên dự phòng cho 19 suất đăng mà vẫn có giới hạn rõ cho chi phí viết/duyệt.
 - Hệ quả: 30 URL đề xuất không bảo đảm 30 tin hợp lệ sau xác minh, và 30 ứng viên thử không bảo đảm 19 bài đạt kiểm duyệt.

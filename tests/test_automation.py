@@ -90,7 +90,7 @@ class AutomationTests(unittest.TestCase):
         database.save_articles(self.path, self.source_id, self.articles("early-schedule", 2))
         writes = 0
 
-        def write_draft(*args):
+        def write_draft(*args, **kwargs):
             nonlocal writes
             writes += 1
             if writes == 2:
@@ -433,6 +433,28 @@ class AutomationTests(unittest.TestCase):
         self.assertFalse(database.automation_refill_needed(
             self.path, now.isoformat(), start, end, cutoff, 19))
 
+    def test_custom_candidate_pool_stops_at_twenty_five(self):
+        now = datetime(2026, 10, 30, 17, 0, tzinfo=timezone.utc)
+        database.save_content_settings(self.path, "25", database.DEFAULT_WRITING_STYLE,
+                                       database.DEFAULT_RESEARCH_FOCUS)
+        database.save_articles(self.path, self.source_id, [
+            {"title": f"Candidate {index}", "url": f"https://example.com/custom-pool/{index}",
+             "summary": "New software", "published_at": now.isoformat()}
+            for index in range(26)
+        ])
+        database.claim_daily_automation_scan(self.path, now.isoformat())
+        with database.connect(self.path) as db:
+            db.executemany(
+                "INSERT INTO automation_jobs (article_id, status, claimed_at) VALUES (?, 'blocked', ?)",
+                [(index, now.isoformat()) for index in range(1, 26)],
+            )
+        start, end = automation.daily_bounds(now)
+        cutoff = (now - timedelta(hours=48)).isoformat()
+        self.assertIsNone(database.claim_automation_article(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+        self.assertFalse(database.automation_refill_needed(
+            self.path, now.isoformat(), start, end, cutoff, 19))
+
     def test_publish_block_triggers_refill_for_later_configured_slot(self):
         database.save_posting_settings(self.path, "3", "08:00, 13:00, 18:00")
         now = datetime(2026, 10, 31, 7, 0, tzinfo=timezone.utc)  # 14:00 Bangkok
@@ -546,6 +568,15 @@ class AutomationTests(unittest.TestCase):
         ) + ']}'
         picked, _ = research._ordered_ids(candidates, raw, 2)
         self.assertEqual(picked, [1, 2])
+
+    def test_saved_focus_reaches_rss_ranking_without_web_discovery(self):
+        database.save_content_settings(self.path, "25", database.DEFAULT_WRITING_STYLE,
+                                       "Ưu tiên công cụ bảo mật mã nguồn mở có demo.")
+        database.claim_daily_automation_scan(self.path, self.now.isoformat())
+        database.save_articles(self.path, self.source_id, self.articles("focus", 1))
+        with patch("app.research.llm.chat", return_value='{"picks":[{"id":1,"reason":"Phù hợp"}]}') as chat:
+            research.review_candidates(self.path, self.now, 1)
+        self.assertIn("Ưu tiên công cụ bảo mật mã nguồn mở có demo.", chat.call_args.args[0])
 
     def test_custom_posting_settings_limit_and_times(self):
         settings = database.save_posting_settings(self.path, "2", "13:15, 8:00")

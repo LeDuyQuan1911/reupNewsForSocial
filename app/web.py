@@ -191,6 +191,7 @@ def create_app(database_path: Path | None = None) -> Flask:
             "hermes.html", cycle=cycle,
             web_research_enabled=hermes_research.enabled(),
             posting_settings=database.get_posting_settings(app.config["DATABASE_PATH"]),
+            content_settings=database.get_content_settings(app.config["DATABASE_PATH"]),
             automation_status=database.automation_status(app.config["DATABASE_PATH"]),
         )
 
@@ -220,6 +221,19 @@ def create_app(database_path: Path | None = None) -> Flask:
             flash(str(exc), "error")
         else:
             flash(f"Đã lưu {settings['posts_per_day']} bài tự động/ngày. Lịch đã xếp trước đó giữ nguyên.", "success")
+        return redirect(url_for("hermes_page"))
+
+    @app.post("/account/content-settings")
+    def update_content_settings():
+        try:
+            database.save_content_settings(
+                app.config["DATABASE_PATH"], request.form.get("candidate_limit", ""),
+                request.form.get("writing_style", ""), request.form.get("research_focus", ""),
+            )
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash("Đã lưu thiết lập nội dung cho các lượt tìm và viết tiếp theo.", "success")
         return redirect(url_for("hermes_page"))
 
     @app.get("/facebook")
@@ -467,8 +481,10 @@ def create_app(database_path: Path | None = None) -> Flask:
             flash("Không thể viết lại bài đã lên lịch hoặc đã đăng.", "error")
             return redirect(url_for("edit_post", post_id=post_id))
         try:
-            body = llm.write_draft(post["article_title"], post["article_summary"], post["article_url"], post["source_kind"])
-            comment = llm.write_first_comment(post["article_title"], post["article_summary"], post["article_url"], body)
+            body = llm.write_draft(post["article_title"], post["article_summary"], post["article_url"], post["source_kind"],
+                                   database_path=app.config["DATABASE_PATH"])
+            comment = llm.write_first_comment(post["article_title"], post["article_summary"], post["article_url"], body,
+                                              database_path=app.config["DATABASE_PATH"])
             database.update_draft(app.config["DATABASE_PATH"], post_id, body)
             database.set_first_comment(app.config["DATABASE_PATH"], post_id, comment)
             flash("Hermes đã viết bản nháp và chuẩn bị bình luận. Hãy đọc lại trước khi đăng.", "success")

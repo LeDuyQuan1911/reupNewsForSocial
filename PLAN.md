@@ -6,6 +6,8 @@
 
 ## Đã xong
 
+- [x] Cho chỉnh giới hạn ứng viên dự phòng, phong cách viết bài/bình luận và ưu tiên tìm tin trên trang Hermes; lưu trong SQLite và dùng ở các lượt tiếp theo.
+
 - [x] Nâng nhóm ứng viên tự động cho mục tiêu 19 bài/ngày lên tối đa 30 URL Hermes và 30 tin được thử chuẩn bị, dùng tin dư thay bài bị chặn.
 - [x] Cho luồng tự động tìm thêm ứng viên khi bài bị chặn và còn giờ cấu hình trống trong ngày; không đẩy bài bù sang ngày hôm sau.
 

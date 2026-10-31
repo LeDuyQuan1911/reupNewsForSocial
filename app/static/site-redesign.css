@@ -247,6 +247,11 @@ button, a, input, select, textarea { touch-action: manipulation; }
 .posting-settings-scan strong { color: #234457; font-size: 13px; }
 .posting-settings-scan p { margin: 4px 0 0; color: #607685; font-size: 12px; line-height: 1.5; }
 .posting-settings-scan form { flex: none; }
+.content-settings-form { display: grid; gap: 18px; }
+.content-settings-form .posting-settings-field { max-width: 800px; }
+.content-settings-form textarea { width: 100%; resize: vertical; min-height: 110px; border: 1px solid #bdccd7; border-radius: 5px; background: #fff; color: var(--ink); padding: 10px 12px; font: inherit; line-height: 1.5; }
+.content-settings-form textarea:focus-visible { outline: 3px solid #b8d7ff; outline-offset: 1px; border-color: var(--blue); }
+.content-settings-form button { justify-self: start; }
 .account-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .account-metrics > div { min-width: 0; padding: 15px; border-right: 1px solid var(--line); background: #f9fbfd; }
 .account-metrics > div:last-child { border: 0; }
